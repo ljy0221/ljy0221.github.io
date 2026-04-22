@@ -347,7 +347,8 @@
     padding: 16px; border-left: 3px solid var(--blue-500);
     margin-bottom: 8px;
   }
-  .modal-highlight .mh-title { font-size: 13px; font-weight: 700; color: var(--gray-900); margin-bottom: 4px; }
+  .modal-highlight .mh-title { font-size: 13px; font-weight: 700; color: var(--gray-900); margin-bottom: 4px; transition: color 0.15s; }
+  .modal-highlight .mh-title:hover { color: var(--blue-600); }
   .modal-highlight .mh-desc { font-size: 13px; color: var(--gray-600); line-height: 1.6; }
   .modal-links { display: flex; gap: 10px; margin-top: 24px; }
   .modal-link {
@@ -673,10 +674,10 @@ const projects = {
     title: 'AiRadar — 실시간 AI 기술 인텔리전스 플랫폼',
     period: '2026.02 ~ 2026.03 · 6인 · 팀장 / 데이터 파이프라인 · AI 서버 · 백엔드',
     highlights: [
-      { title: '데이터 파이프라인 단독 설계·구현', desc: 'Kafka 중간 버퍼 + AvailableNow() Trigger 증분 처리. Spark Job 4개·Airflow DAG 7개. 일 ~1,800건·~30MB, 전체 사이클 ~23~50분.' },
-      { title: 'AI 서버 (Python FastAPI)', desc: 'Claude Haiku 배치 10건/API 호출, Semaphore(2) OOM 방지. JSON 파싱 복구 로직. 768차원 임베딩 → pgvector IVFFlat 저장.' },
-      { title: '4단계 Fallback 추천 아키텍처', desc: 'Redis 캐시 HIT ~1ms → ALS 재랭킹 ~50ms → PostgreSQL 배열 교집합 ~100ms → Cold Start Top-20. @Async 이벤트 API <50ms.' },
-      { title: '인프라 장애 8건 직접 해결', desc: 'OOM Kill, ANTLR 버전 충돌, 파티션 불일치 등 복합 원인 분석. 재발 0건. 장애→원인 특정→재처리→검증 사이클 수립.' },
+      { title: '데이터 파이프라인 단독 설계·구현', desc: 'Kafka 중간 버퍼 + AvailableNow() Trigger 증분 처리. Spark Job 4개·Airflow DAG 7개. 일 ~1,800건·~30MB, 전체 사이클 ~23~50분.', velog: 'https://velog.io/@ljy0221' },
+      { title: 'AI 서버 (Python FastAPI)', desc: 'Claude Haiku 배치 10건/API 호출, Semaphore(2) OOM 방지. JSON 파싱 복구 로직. 768차원 임베딩 → pgvector IVFFlat 저장.', velog: 'https://velog.io/@ljy0221' },
+      { title: '4단계 Fallback 추천 아키텍처', desc: 'Redis 캐시 HIT ~1ms → ALS 재랭킹 ~50ms → PostgreSQL 배열 교집합 ~100ms → Cold Start Top-20. @Async 이벤트 API <50ms.', velog: 'https://velog.io/@ljy0221' },
+      { title: '인프라 장애 8건 직접 해결', desc: 'OOM Kill, ANTLR 버전 충돌, 파티션 불일치 등 복합 원인 분석. 재발 0건. 장애→원인 특정→재처리→검증 사이클 수립.', velog: 'https://velog.io/@ljy0221' },
     ],
     tags: ['Kafka', 'Spark 3.5', 'Airflow 2.8', 'Delta Lake', 'FastAPI', 'pgvector', 'Redis', 'Spring Boot 3.3'],
     github: 'https://github.com/ljy0221/AiRadar',
@@ -686,9 +687,9 @@ const projects = {
     title: 'SYNAPSE — 개발자 특화 실시간 협업 노트',
     period: '2026.01 ~ 2026.02 · 6인 · 백엔드 / 실시간 협업·데이터 계층 설계',
     highlights: [
-      { title: '3DB 하이브리드 아키텍처 주도 설계', desc: 'MySQL(메타·권한·관계) + MongoDB(Yjs Delta 문서·스키마 유연성) + Redis(실시간 세션·분산 락). 각 DB 강점을 역할별로 분리.' },
-      { title: 'Yjs CRDT 실시간 협업 구현', desc: '서버 조율 없이 클라이언트 간 수학적 병합. WebSocket Y-Doc 동기화, Awareness 기반 실시간 커서 공유. 오프라인 후 재연결 자동 동기화.' },
-      { title: '프론트엔드 성능 개선', desc: 'manualChunks로 번들 2,100KB → 580KB (72% 감소). Promise.all() 병렬 호출로 노트 로드 400ms → 200ms. React.memo 메모이제이션.' },
+      { title: '3DB 하이브리드 아키텍처 주도 설계', desc: 'MySQL(메타·권한·관계) + MongoDB(Yjs Delta 문서·스키마 유연성) + Redis(실시간 세션·분산 락). 각 DB 강점을 역할별로 분리.', velog: 'https://velog.io/@ljy0221' },
+      { title: 'Yjs CRDT 실시간 협업 구현', desc: '서버 조율 없이 클라이언트 간 수학적 병합. WebSocket Y-Doc 동기화, Awareness 기반 실시간 커서 공유. 오프라인 후 재연결 자동 동기화.', velog: 'https://velog.io/@ljy0221' },
+      { title: '프론트엔드 성능 개선', desc: 'manualChunks로 번들 2,100KB → 580KB (72% 감소). Promise.all() 병렬 호출로 노트 로드 400ms → 200ms. React.memo 메모이제이션.', velog: 'https://velog.io/@ljy0221' },
     ],
     tags: ['Spring Boot', 'Yjs CRDT', 'WebSocket', 'Electron', 'MongoDB', 'Redis', 'MySQL'],
     github: 'https://github.com/ljy0221/SynapseNote',
@@ -698,8 +699,8 @@ const projects = {
     title: '갈래말래 — AI 기반 여행지 추천 서비스',
     period: '2025.11 ~ 2025.12 · 6인 · 백엔드',
     highlights: [
-      { title: 'JWT Rotation 인증·인가 시스템', desc: 'Access/Refresh 토큰 Rotation으로 탈취 방지. 재사용 감지 시 즉시 폐기, 자동 갱신으로 UX 개선.' },
-      { title: 'Redis 캐시 도입', desc: 'JWT 블랙리스트 DB 쿼리 95% 감소. Tour API 응답 300~2,000ms → 1~5ms (캐시 히트 기준).' },
+      { title: 'JWT Rotation 인증·인가 시스템', desc: 'Access/Refresh 토큰 Rotation으로 탈취 방지. 재사용 감지 시 즉시 폐기, 자동 갱신으로 UX 개선.', velog: 'https://velog.io/@ljy0221' },
+      { title: 'Redis 캐시 도입', desc: 'JWT 블랙리스트 DB 쿼리 95% 감소. Tour API 응답 300~2,000ms → 1~5ms (캐시 히트 기준).', velog: 'https://velog.io/@ljy0221' },
     ],
     tags: ['Spring Boot', 'MySQL', 'Redis', 'JWT', 'REST API'],
     github: 'https://github.com/ljy0221/SpontaneousTrip',
@@ -717,7 +718,7 @@ function openModal(id) {
       <div class="modal-section-title">핵심 구현</div>
       ${p.highlights.map(h => `
         <div class="modal-highlight">
-          <div class="mh-title">${h.title}</div>
+          <a href="${h.velog}" target="_blank" class="mh-title" style="text-decoration: none; color: var(--gray-900); cursor: pointer; display: inline-block;">${h.title}</a>
           <div class="mh-desc">${h.desc}</div>
         </div>
       `).join('')}

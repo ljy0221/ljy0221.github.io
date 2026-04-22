@@ -80,7 +80,7 @@
   }
   .hero h1 .highlight { color: var(--blue-600); }
   .hero p { font-size: 16px; color: var(--gray-600); line-height: 1.8; margin-bottom: 32px; max-width: 440px; }
-  .hero-btns { display: flex; gap: 12px; }
+  .hero-btns { display: flex; gap: 12px; flex-wrap: wrap; max-width: 500px; }
   .btn-primary {
     background: var(--gray-900); color: #fff;
     padding: 13px 24px; border-radius: var(--radius-sm);
@@ -382,19 +382,21 @@
   <div>
     <div class="hero-badge">Backend Developer · SSAFY 14기</div>
     <h1>데이터로<br><span class="highlight">문제를 해결</span>하는<br>개발자</h1>
-    <p>Kafka·Spark·Airflow 기반 데이터 파이프라인부터 AI 서버, Spring Boot 백엔드까지. 운영 환경의 장애를 끝까지 추적해 해결합니다.</p>
+    <p style="margin-bottom: 12px;">Kafka·Spark·Airflow 기반 데이터 파이프라인부터 AI 서버, Spring Boot 백엔드까지. 운영 환경의 장애를 끝까지 추적해 해결합니다.</p>
+    <p style="font-size: 13px; color: var(--blue-600); font-weight: 600; margin-bottom: 24px;">주 기술 영역: Data Pipeline · AI Server · Backend</p>
     <div class="hero-btns">
       <button class="btn-primary" onclick="document.getElementById('projects').scrollIntoView({behavior:'smooth'})">프로젝트 보기</button>
-      <a class="btn-secondary" href="resume.pdf" download="이재영_이력서.pdf">이력서 다운로드</a>
+      <a class="btn-secondary" href="mailto:jaeyeong221@gmail.com">이메일 연락</a>
+      <a class="btn-secondary" href="resume.pdf" download="이재영_이력서.pdf">이력서 다운</a>
     </div>
   </div>
   <div class="metrics-card">
     <div class="metrics-label">핵심 성과</div>
     <div class="metrics-grid">
-      <div class="metric-item"><div class="metric-num">~1ms</div><div class="metric-lbl">Redis 캐시 응답속도</div></div>
-      <div class="metric-item"><div class="metric-num">8건</div><div class="metric-lbl">인프라 장애 직접 해결</div></div>
-      <div class="metric-item"><div class="metric-num">1,800+</div><div class="metric-lbl">일일 데이터 처리량</div></div>
-      <div class="metric-item"><div class="metric-num">72%</div><div class="metric-lbl">번들 크기 감소</div></div>
+      <div class="metric-item"><div class="metric-num">~1ms</div><div class="metric-lbl">추천 응답속도<br><span style="font-size: 11px; color: var(--gray-600);">(300ms→1ms)</span></div></div>
+      <div class="metric-item"><div class="metric-num">8건</div><div class="metric-lbl">인프라 장애<br><span style="font-size: 11px; color: var(--gray-600);">직접 해결</span></div></div>
+      <div class="metric-item"><div class="metric-num">1,800+</div><div class="metric-lbl">일일 처리량<br><span style="font-size: 11px; color: var(--gray-600);">(~30MB)</span></div></div>
+      <div class="metric-item"><div class="metric-num">72%</div><div class="metric-lbl">성능 개선<br><span style="font-size: 11px; color: var(--gray-600);">(400→200ms)</span></div></div>
     </div>
   </div>
 </div>
@@ -680,7 +682,7 @@ const projects = {
       { title: '데이터 파이프라인 단독 설계·구현', desc: 'Kafka 중간 버퍼 + AvailableNow() Trigger 증분 처리. Spark Job 4개·Airflow DAG 7개. 일 ~1,800건·~30MB, 전체 사이클 ~23~50분.', velog: 'https://velog.io/@ljy0221' },
       { title: 'AI 서버 (Python FastAPI)', desc: 'Claude Haiku 배치 10건/API 호출, Semaphore(2) OOM 방지. JSON 파싱 복구 로직. 768차원 임베딩 → pgvector IVFFlat 저장.', velog: 'https://velog.io/@ljy0221' },
       { title: '4단계 Fallback 추천 아키텍처', desc: 'Redis 캐시 HIT ~1ms → ALS 재랭킹 ~50ms → PostgreSQL 배열 교집합 ~100ms → Cold Start Top-20. @Async 이벤트 API <50ms.', velog: 'https://velog.io/@ljy0221' },
-      { title: '인프라 장애 8건 직접 해결', desc: 'OOM Kill, ANTLR 버전 충돌, 파티션 불일치 등 복합 원인 분석. 재발 0건. 장애→원인 특정→재처리→검증 사이클 수립.', velog: 'https://velog.io/@ljy0221' },
+      { title: '인프라 장애 8건 직접 해결', desc: '배포 후 OOM Kill(Spark 드라이버 메모리 부족) → JVM 옵션 조정으로 해결. ANTLR 라이브러리 버전 충돌로 인한 파싱 에러 감지 후 dependency 재정리. Partition 불일치로 인한 중복 처리 방지. 재발 0건. 장애→로그 분석→원인 특정→패치→재처리→검증 사이클 수립.', velog: 'https://velog.io/@ljy0221' },
     ],
     tags: ['Kafka', 'Spark 3.5', 'Airflow 2.8', 'Delta Lake', 'FastAPI', 'pgvector', 'Redis', 'Spring Boot 3.3'],
     github: 'https://github.com/ljy0221/AiRadar',

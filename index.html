@@ -179,8 +179,34 @@
     border-radius: var(--radius-md); padding: 16px 18px;
   }
   .skill-category { font-size: 10px; font-weight: 700; color: var(--gray-400); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 10px; }
-  .skill-list { display: flex; flex-direction: column; gap: 6px; }
-  .skill-item { font-size: 13px; color: var(--gray-700); font-weight: 500; }
+  .skill-list { display: flex; flex-direction: column; gap: 8px; }
+  .skill-item {
+    font-size: 13px; color: var(--gray-700); font-weight: 500;
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  }
+  .skill-name { flex: 1; }
+  .skill-level { font-size: 11px; color: var(--gray-400); letter-spacing: 1px; flex-shrink: 0; }
+  .skill-level.level-5 { color: var(--blue-600); font-weight: 700; }
+  .skill-level.level-4 { color: var(--blue-500); font-weight: 600; }
+  .skill-level.level-3 { color: var(--blue-400); }
+
+  /* SKILL LEGEND */
+  .skill-legend {
+    background: var(--gray-50); border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md); padding: 16px 20px;
+    margin-bottom: 24px;
+  }
+  .legend-items { display: flex; flex-wrap: wrap; gap: 16px; }
+  .legend-item {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 12px; color: var(--gray-600);
+  }
+  .level-dots { font-size: 10px; letter-spacing: 2px; }
+  .level-dots.level-5 { color: var(--blue-600); }
+  .level-dots.level-4 { color: var(--blue-500); }
+  .level-dots.level-3 { color: var(--blue-400); }
+  .level-dots.level-2 { color: var(--blue-300); }
+  .level-dots.level-1 { color: var(--gray-300); }
 
   /* ===== INTERACTIVE ANIMATIONS ===== */
 
@@ -471,38 +497,51 @@
   <div class="section-eyebrow">Skills</div>
   <div class="section-title">기술 스택</div>
   <div class="section-sub">실제 프로젝트에서 사용한 기술들입니다.</div>
+
+  <!-- 레벨 범례 -->
+  <div class="skill-legend">
+    <div style="font-size: 12px; font-weight: 600; color: var(--gray-900); margin-bottom: 12px;">숙련도 레벨</div>
+    <div class="legend-items">
+      <div class="legend-item"><span class="level-dots level-5">●●●●●</span> <span>Expert</span> (2년 이상 심화, 아키텍처 설계)</div>
+      <div class="legend-item"><span class="level-dots level-4">●●●●</span> <span>Advanced</span> (1년 이상, 실무 중심)</div>
+      <div class="legend-item"><span class="level-dots level-3">●●●</span> <span>Intermediate</span> (6개월 이상, 기본 활용)</div>
+      <div class="legend-item"><span class="level-dots level-2">●●</span> <span>Basic</span> (프로젝트 경험, 학습 중)</div>
+      <div class="legend-item"><span class="level-dots level-1">●</span> <span>Familiar</span> (개념 이해, 시작)</div>
+    </div>
+  </div>
+
   <div class="skills-grid">
     <div class="skill-card reveal">
       <div class="skill-category">Backend</div>
       <div class="skill-list">
-        <div class="skill-item">Java · Spring Boot 3.x</div>
-        <div class="skill-item">Python · FastAPI</div>
-        <div class="skill-item">Node.js</div>
+        <div class="skill-item"><span class="skill-name">Java · Spring Boot 3.x</span><span class="skill-level level-5">●●●●●</span></div>
+        <div class="skill-item"><span class="skill-name">Python · FastAPI</span><span class="skill-level level-4">●●●●</span></div>
+        <div class="skill-item"><span class="skill-name">Node.js</span><span class="skill-level level-3">●●●</span></div>
       </div>
     </div>
-    <div class="skill-card">
+    <div class="skill-card reveal">
       <div class="skill-category">Data</div>
       <div class="skill-list">
-        <div class="skill-item">Apache Kafka</div>
-        <div class="skill-item">Apache Spark 3.5</div>
-        <div class="skill-item">Apache Airflow 2.8</div>
-        <div class="skill-item">Delta Lake</div>
+        <div class="skill-item"><span class="skill-name">Apache Kafka</span><span class="skill-level level-5">●●●●●</span></div>
+        <div class="skill-item"><span class="skill-name">Apache Spark 3.5</span><span class="skill-level level-5">●●●●●</span></div>
+        <div class="skill-item"><span class="skill-name">Apache Airflow 2.8</span><span class="skill-level level-4">●●●●</span></div>
+        <div class="skill-item"><span class="skill-name">Delta Lake</span><span class="skill-level level-4">●●●●</span></div>
       </div>
     </div>
-    <div class="skill-card">
+    <div class="skill-card reveal">
       <div class="skill-category">Database</div>
       <div class="skill-list">
-        <div class="skill-item">PostgreSQL · pgvector</div>
-        <div class="skill-item">MySQL · MongoDB</div>
-        <div class="skill-item">Redis</div>
+        <div class="skill-item"><span class="skill-name">PostgreSQL · pgvector</span><span class="skill-level level-4">●●●●</span></div>
+        <div class="skill-item"><span class="skill-name">MySQL · MongoDB</span><span class="skill-level level-4">●●●●</span></div>
+        <div class="skill-item"><span class="skill-name">Redis</span><span class="skill-level level-5">●●●●●</span></div>
       </div>
     </div>
-    <div class="skill-card">
+    <div class="skill-card reveal">
       <div class="skill-category">Infra / AI</div>
       <div class="skill-list">
-        <div class="skill-item">Docker · Jenkins CI/CD</div>
-        <div class="skill-item">AWS EC2 · S3 · MinIO</div>
-        <div class="skill-item">RAG · Embedding</div>
+        <div class="skill-item"><span class="skill-name">Docker · Jenkins</span><span class="skill-level level-3">●●●</span></div>
+        <div class="skill-item"><span class="skill-name">AWS EC2 · S3</span><span class="skill-level level-3">●●●</span></div>
+        <div class="skill-item"><span class="skill-name">RAG · Embedding</span><span class="skill-level level-4">●●●●</span></div>
       </div>
     </div>
   </div>

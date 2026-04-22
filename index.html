@@ -179,6 +179,58 @@
   .skill-list { display: flex; flex-direction: column; gap: 6px; }
   .skill-item { font-size: 13px; color: var(--gray-700); font-weight: 500; }
 
+  /* ===== INTERACTIVE ANIMATIONS ===== */
+
+  /* 1. 페이지 로드 애니메이션 */
+  @keyframes fadeSlideUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .hero-badge, .hero h1, .hero p, .hero-btns, .metrics-card {
+    opacity: 0;
+    animation: fadeSlideUp 0.6s ease-out forwards;
+  }
+  .hero-badge { animation-delay: 0.1s; }
+  .hero h1 { animation-delay: 0.2s; }
+  .hero p { animation-delay: 0.3s; }
+  .hero-btns { animation-delay: 0.4s; }
+  .metrics-card { animation-delay: 0.3s; }
+
+  /* 3. 스크롤 진입 애니메이션 */
+  .reveal {
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 0.6s ease-out, transform 0.6s ease-out;
+  }
+  .reveal.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* 4. 스킬 카드 hover */
+  .skill-card {
+    transition: transform 0.2s ease, border-color 0.2s ease;
+  }
+  .skill-card:hover {
+    transform: translateY(-3px);
+    border-color: var(--blue-500);
+  }
+
+  /* 5. Nav 활성 링크 */
+  .nav-links a.active {
+    color: var(--gray-900);
+    font-weight: 700;
+  }
+
+  /* 6. 태그 hover */
+  .tag {
+    transition: background 0.15s, color 0.15s;
+  }
+  .tag:hover {
+    background: var(--blue-50);
+    color: var(--blue-600);
+  }
+
   @media (max-width: 1024px) {
     .skills-grid { grid-template-columns: repeat(2, 1fr); }
   }
@@ -352,7 +404,7 @@
   <div class="section-sub">실제 운영 환경에서 설계하고 구현한 프로젝트입니다. 카드를 클릭하면 상세 내용을 볼 수 있습니다.</div>
   <div class="proj-grid">
 
-    <div class="proj-card" onclick="openModal('airada')">
+    <div class="proj-card reveal" onclick="openModal('airada')">
       <div>
         <div class="proj-header">
           <div class="proj-icon" style="background:#eff6ff">🤖</div>
@@ -369,7 +421,7 @@
       <div class="proj-arrow">→</div>
     </div>
 
-    <div class="proj-card" onclick="openModal('synapse')">
+    <div class="proj-card reveal" onclick="openModal('synapse')">
       <div>
         <div class="proj-header">
           <div class="proj-icon" style="background:#f0fdf4">📝</div>
@@ -386,7 +438,7 @@
       <div class="proj-arrow">→</div>
     </div>
 
-    <div class="proj-card" onclick="openModal('galrae')">
+    <div class="proj-card reveal" onclick="openModal('galrae')">
       <div>
         <div class="proj-header">
           <div class="proj-icon" style="background:#fff7ed">✈️</div>
@@ -414,7 +466,7 @@
   <div class="section-title">기술 스택</div>
   <div class="section-sub">실제 프로젝트에서 사용한 기술들입니다.</div>
   <div class="skills-grid">
-    <div class="skill-card">
+    <div class="skill-card reveal">
       <div class="skill-category">Backend</div>
       <div class="skill-list">
         <div class="skill-item">Java · Spring Boot 3.x</div>
@@ -479,22 +531,22 @@
     </div>
     <div>
       <div class="timeline">
-        <div class="timeline-item">
+        <div class="timeline-item reveal">
           <div class="timeline-period">2025.07 ~ 2026.06</div>
           <div class="timeline-title">SSAFY 14기</div>
           <div class="timeline-desc">빅데이터·분산 처리 트랙<br>Java·Spring Boot 4회 팀프로젝트</div>
         </div>
-        <div class="timeline-item">
+        <div class="timeline-item reveal">
           <div class="timeline-period">2026.02 ~ 03</div>
           <div class="timeline-title">AiRadar (팀장)</div>
           <div class="timeline-desc">데이터 파이프라인·AI 서버·백엔드</div>
         </div>
-        <div class="timeline-item">
+        <div class="timeline-item reveal">
           <div class="timeline-period">2026.01 ~ 02</div>
           <div class="timeline-title">SYNAPSE</div>
           <div class="timeline-desc">실시간 협업 노트 백엔드</div>
         </div>
-        <div class="timeline-item">
+        <div class="timeline-item reveal">
           <div class="timeline-period">2025.11 ~ 12</div>
           <div class="timeline-title">갈래말래</div>
           <div class="timeline-desc">여행지 추천 백엔드</div>
@@ -524,6 +576,97 @@
 </div>
 
 <script>
+// ===== 2. 숫자 카운트업 애니메이션 =====
+function countUp(element, target, suffix, duration = 1000) {
+  const startTime = Date.now();
+
+  function easeOutQuart(t) {
+    return 1 - Math.pow(1 - t, 4);
+  }
+
+  function animate() {
+    const elapsed = Date.now() - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    const eased = easeOutQuart(progress);
+
+    let displayValue = '';
+    if (target === '~1ms') {
+      displayValue = '~' + Math.ceil(eased * 1) + 'ms';
+    } else if (target === '8건') {
+      displayValue = Math.ceil(eased * 8) + '건';
+    } else if (target === '1,800+') {
+      const num = Math.ceil(eased * 1800);
+      displayValue = num.toLocaleString() + '+';
+    } else if (target === '72%') {
+      displayValue = Math.ceil(eased * 72) + '%';
+    }
+
+    element.textContent = displayValue;
+
+    if (progress < 1) {
+      requestAnimationFrame(animate);
+    }
+  }
+  animate();
+}
+
+// 페이지 로드 후 카운트업 시작
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    const metrics = document.querySelectorAll('.metric-num');
+    if (metrics[0]) countUp(metrics[0], '~1ms', 'ms');
+    if (metrics[1]) countUp(metrics[1], '8건', '건');
+    if (metrics[2]) countUp(metrics[2], '1,800+', '+');
+    if (metrics[3]) countUp(metrics[3], '72%', '%');
+  }, 600); // Hero 애니메이션이 끝난 후
+});
+
+// ===== 3 + 5. IntersectionObserver (스크롤 진입 + nav 활성화) =====
+const observerOptions = {
+  root: null,
+  rootMargin: '-50% 0px -50% 0px',
+  threshold: 0
+};
+
+const sectionObserver = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.classList.add('visible');
+    }
+  });
+}, { rootMargin: '0px 0px -100px 0px', threshold: 0 });
+
+// reveal 클래스를 가진 모든 요소 관찰
+document.querySelectorAll('.reveal').forEach(el => {
+  sectionObserver.observe(el);
+});
+
+// Nav 활성화 로직
+const navLinks = document.querySelectorAll('.nav-links a');
+const sections = {
+  '소개': document.getElementById('about'),
+  '프로젝트': document.getElementById('projects'),
+  '기술': document.getElementById('skills')
+};
+
+const navObserver = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      // 현재 섹션에 해당하는 nav 링크 활성화
+      navLinks.forEach(link => {
+        link.classList.remove('active');
+        if (entry.target.id === 'about' && link.textContent === '소개') link.classList.add('active');
+        if (entry.target.id === 'projects' && link.textContent === '프로젝트') link.classList.add('active');
+        if (entry.target.id === 'skills' && link.textContent === '기술') link.classList.add('active');
+      });
+    }
+  });
+}, { threshold: 0.3 });
+
+Object.values(sections).forEach(section => {
+  if (section) navObserver.observe(section);
+});
+
 const projects = {
   airada: {
     eyebrow: 'Data Pipeline · AI Server · Backend',

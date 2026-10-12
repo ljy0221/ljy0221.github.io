@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AiRadar · 이재영</title>
+<meta name="description" content="AiRadar: 추천 서빙 API와 수집 파이프라인. 파이프라인 날짜 기준 통일, Airflow 컨테이너 OOM 원인 분석, 추천 캐시 경합 원자화.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;600&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">본문으로 건너뛰기</a>
+
+<header class="bar">
+  <div class="bar-inner">
+    <a class="bar-name" href="../../">이재영</a>
+    <nav aria-label="프로젝트">
+      <a href="../butterfly/">Butterfly</a>
+      <a href="./" aria-current="page">AiRadar</a>
+      <a href="../synapse/">SYNAPSE</a>
+      <a href="../galrae/">갈래말래</a>
+      <a href="../maeumssi/">마음씨</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap case">
+
+  <aside class="rail" aria-label="프로젝트 정보">
+    <dl>
+      <dt>기간</dt><dd>2026.02 – 03 (6주, 실 개발 약 4주)</dd>
+      <dt>팀</dt><dd>6명 (백엔드 3, 프론트 2, 인프라 1)</dd>
+      <dt>담당</dt><dd>추천 서빙 API(캐시, 재랭킹, Cold Start), Spark 메달리온 파이프라인과 Airflow DAG, AI 서버(분석·임베딩)</dd>
+      <dt>스택</dt><dd>Java 17, Spring Boot 3.3.5, Python, FastAPI, Kafka, Spark 3.5, Airflow 2.8, Delta Lake 3.1, PostgreSQL 16 + pgvector, Redis</dd>
+      <dt>레포</dt><dd><a href="https://github.com/ljy0221/AiRadar">ljy0221/AiRadar</a></dd>
+    </dl>
+    <nav class="toc" aria-label="이 페이지 목차">
+      <ol>
+        <li><a href="#date">날짜 기준 통일</a></li>
+        <li><a href="#oom">Airflow OOM 분석</a></li>
+        <li><a class="is-later" href="#later-09">캐시 경합과 재측정</a></li>
+      </ol>
+    </nav>
+  </aside>
+
+  <main id="main" class="case-main">
+    <h1 class="case-title">AiRadar</h1>
+    <p class="case-sub">추천 서빙 API와 수집 파이프라인</p>
+
+    <p class="lede">논문과 뉴스를 수집해 Spark 메달리온 파이프라인과 Airflow DAG를 거쳐 추천 API로 제공하는 데이터 플랫폼입니다. 저는 추천 서빙 API와 그 앞단인 파이프라인, AI 서버를 맡았습니다.</p>
+    <p>크롤링, Trend 집계, 프론트, AI 서버의 직업 위험도 모듈은 다른 팀원 영역입니다. 컨테이너와 실행 환경 설정은 인프라 담당 팀원과 함께 다뤘습니다.</p>
+
+    <figure>
+      <div class="shot">
+        <img src="../../assets/img/airadar-architecture.png" width="2819" height="1201" loading="lazy" alt="AiRadar 전체 아키텍처. SERVER 1에 Spark, Kafka, Airflow, 웹 크롤러가 있고 S3에 Bronze와 Silver 버킷이 있습니다. SERVER 2에 Nginx, Next.js, Spring Boot, Redis, PostgreSQL Gold, AI 서버가 있고 AI 서버는 Anthropic API를 호출합니다.">
+      </div>
+      <figcaption>팀 레포의 전체 아키텍처 그림입니다(<code>docs/diagrams/Architecture.png</code>, 팀 공동 작성). 이 중 Spark와 Airflow 파이프라인, AI 서버, Spring Boot의 추천 서빙 부분이 제 담당입니다.</figcaption>
+    </figure>
+
+    <section aria-labelledby="date">
+      <h2 id="date">파이프라인 단계별 날짜 기준 통일</h2>
+
+      <div class="step"><h3>문제</h3><div>
+        <p>Bronze의 <code>batch_date</code>가 소스마다 달랐습니다(뉴스는 크롤링일, 논문은 <code>published_at</code>). Silver Job이 받는 <code>--date</code>는 Airflow <code>ds</code>여서 대상 파티션을 찾지 못했습니다. 그 결과는 실패가 아니라 <strong>Silver 처리 0건</strong>이었습니다.</p>
+      </div></div>
+      <div class="step"><h3>해결</h3><div>
+        <p><code>batch_date</code>를 <code>to_date(kafka_timestamp)</code>(수신 시각) 기준으로 통일했습니다. 발행일 기준은 지연 도착분이 과거 파티션으로 흩어지고 DAG 실행일 기준은 수집 시각과 어긋납니다. 단계 간에 하나로 맞출 수 있는 값이 수신 시각이었습니다.</p>
+      </div></div>
+      <div class="step"><h3>대가</h3><div>
+        <p>지연 도착 중복을 받아들이고 anti-join 재처리를 함께 뒀습니다.</p>
+      </div></div>
+
+      <figure class="scroll">
+        <svg viewBox="0 0 840 300" role="img" aria-labelledby="a1-t a1-d">
+          <title id="a1-t">단계별 날짜 기준 개선 전후</title>
+          <desc id="a1-d">개선 전에는 뉴스는 크롤링일, 논문은 published_at으로 batch_date를 정하고 Silver Job은 Airflow ds로 파티션을 찾아 Silver 처리가 0건이었습니다. 개선 후에는 두 소스 모두 Kafka 수신 시각으로 batch_date를 정해 같은 파티션을 읽고, 지연 도착 중복은 anti-join 재처리로 받습니다.</desc>
+          <defs>
+            <marker id="a1-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-arrow"/></marker>
+            <marker id="a1-ab" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-ab"/></marker>
+          </defs>
+          <text x="0" y="22" class="dg-tb">개선 전</text>
+          <text x="100" y="22" class="dg-s">Bronze batch_date</text>
+          <rect class="dg-bad-box" x="100" y="32" width="230" height="40"/>
+          <text x="116" y="57" class="dg-t">뉴스</text><text x="160" y="57" class="dg-mi">= 크롤링일</text>
+          <rect class="dg-bad-box" x="100" y="82" width="230" height="40"/>
+          <text x="116" y="107" class="dg-t">논문</text><text x="160" y="107" class="dg-mi">= published_at</text>
+          <path class="dg-line" d="M330,52 H360 V77 H396" marker-end="url(#a1-a)"/>
+          <path class="dg-line" d="M330,102 H360 V77"/>
+          <rect class="dg-box" x="400" y="47" width="200" height="60"/>
+          <text x="500" y="72" text-anchor="middle" class="dg-t">Silver Job</text>
+          <text x="500" y="92" text-anchor="middle" class="dg-mi">--date = Airflow ds</text>
+          <line class="dg-bad" x1="600" y1="77" x2="637" y2="77" marker-end="url(#a1-ab)"/>
+          <rect class="dg-risk" x="640" y="47" width="200" height="60"/>
+          <text x="740" y="72" text-anchor="middle" class="dg-tb">Silver 처리 0건</text>
+          <text x="740" y="92" text-anchor="middle" class="dg-s">실패가 아니라 0건이라 발견이 늦음</text>
+
+          <text x="0" y="162" class="dg-tg">개선 후</text>
+          <text x="100" y="162" class="dg-s">Bronze batch_date</text>
+          <rect class="dg-good-box" x="100" y="172" width="230" height="90"/>
+          <text x="116" y="200" class="dg-t">뉴스, 논문 공통</text>
+          <text x="116" y="224" class="dg-mi">= to_date(kafka_timestamp)</text>
+          <text x="116" y="246" class="dg-s">Kafka 수신 시각 기준</text>
+          <line class="dg-line" x1="330" y1="217" x2="396" y2="217" marker-end="url(#a1-a)"/>
+          <rect class="dg-box" x="400" y="187" width="200" height="60"/>
+          <text x="500" y="212" text-anchor="middle" class="dg-t">Silver Job</text>
+          <text x="500" y="232" text-anchor="middle" class="dg-s">같은 날짜 정의로 파티션을 찾음</text>
+          <line class="dg-line" x1="600" y1="217" x2="637" y2="217" marker-end="url(#a1-a)"/>
+          <rect class="dg-good-box" x="640" y="187" width="200" height="60"/>
+          <text x="740" y="212" text-anchor="middle" class="dg-tg">처리됨</text>
+          <text x="740" y="232" text-anchor="middle" class="dg-s">지연 도착 중복은 anti-join 재처리</text>
+          <text x="100" y="292" class="dg-s">남은 위험: Silver 기본 --date는 여전히 ds이고 타임존 설정이 레포에 없어 자정 부근 불일치 가능성이 있습니다.</text>
+        </svg>
+      </figure>
+
+      <div class="lesson">
+        <h3>배운 점</h3>
+        <p>단계마다 "날짜"의 정의가 다르면 실패가 아니라 0건으로 끝나 발견이 늦어집니다. Silver의 기본 <code>--date</code>는 여전히 <code>ds</code>이고 타임존 설정이 레포에 없어 자정 부근 불일치 가능성은 남아 있습니다.</p>
+      </div>
+    </section>
+
+    <section aria-labelledby="oom">
+      <h2 id="oom">Airflow 컨테이너 OOM 원인 분석</h2>
+
+      <div class="step"><h3>문제</h3><div>
+        <p>단일 서버의 Airflow 컨테이너가 SparkSubmit driver를 직접 띄우는 구조(deploy-mode client)에서 컨테이너 메모리 한도를 넘겼습니다.</p>
+      </div></div>
+      <div class="step"><h3>원인</h3><div>
+        <p>가장 유력한 원인 후보를 추려 순서대로 검증했고, 커밋 순서가 검증 순서와 일치합니다. 동시 실행 제한, executor 축소를 거쳐, driver가 executor와 달리 Airflow 컨테이너 안에서 돈다는 점에 따라 컨테이너 <code>mem_limit</code>를 2g에서 6g로 올렸습니다. 이 과정에서 docker-compose 구성과 Spark·Airflow 컨테이너 설정을 인프라 담당 팀원과 함께 조정했습니다.</p>
+      </div></div>
+      <div class="step"><h3>결과</h3><div>
+        <p>이 상향 뒤에도 프로젝트 후반 ALS DAG에서 OOM이 다시 났고, driver 메모리를 줄이는 쪽으로 한 번 더 조정했습니다. 컨테이너 한도만으로 끝나는 문제가 아니었습니다.</p>
+      </div></div>
+
+      <figure class="scroll">
+        <svg viewBox="0 0 840 262" role="img" aria-labelledby="a2-t a2-d">
+          <title id="a2-t">Airflow 컨테이너 안의 driver와 검증 순서</title>
+          <desc id="a2-d">단일 서버에서 Airflow 컨테이너 안에 SparkSubmit driver가 돌고, executor는 Spark 워커 컨테이너에서 돕니다. 검증 순서는 동시 실행 제한, executor 축소, mem_limit 2g에서 6g 상향, ALS DAG의 driver 메모리 1g에서 512m과 overhead 256m 조정입니다.</desc>
+          <defs><marker id="a2-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-arrow"/></marker></defs>
+          <rect class="dg-group" x="0" y="10" width="480" height="230"/>
+          <text x="14" y="30" class="dg-s">단일 서버</text>
+          <rect class="dg-own" x="16" y="44" width="250" height="180"/>
+          <text x="30" y="66" class="dg-t">Airflow 컨테이너</text>
+          <text x="30" y="84" class="dg-mi">mem_limit</text>
+          <rect class="dg-chip" x="30" y="100" width="222" height="34"/>
+          <text x="141" y="122" text-anchor="middle" class="dg-mi">스케줄러, 태스크</text>
+          <rect class="dg-bad-box" x="30" y="146" width="222" height="58"/>
+          <text x="141" y="170" text-anchor="middle" class="dg-t">SparkSubmit driver</text>
+          <text x="141" y="190" text-anchor="middle" class="dg-s">deploy-mode client</text>
+          <rect class="dg-box" x="300" y="44" width="164" height="180"/>
+          <text x="314" y="66" class="dg-t">Spark 워커</text>
+          <rect class="dg-chip" x="314" y="146" width="136" height="58"/>
+          <text x="382" y="180" text-anchor="middle" class="dg-mi">executor</text>
+          <line class="dg-line" x1="252" y1="175" x2="311" y2="175" marker-end="url(#a2-a)"/>
+
+          <text x="520" y="30" class="dg-h">검증 순서 (커밋 순서와 일치)</text>
+          <text x="520" y="62" class="dg-t">1  동시 실행 제한</text>
+          <text x="520" y="92" class="dg-t">2  executor 축소</text>
+          <text x="520" y="122" class="dg-t">3  mem_limit 2g → 6g</text>
+          <text x="538" y="140" class="dg-s">driver는 Airflow 컨테이너 안에서 돈다</text>
+          <text x="520" y="172" class="dg-tb">4  후반 ALS DAG에서 OOM 재발</text>
+          <text x="538" y="190" class="dg-s">driver 1g → 512m + overhead 256m</text>
+          <text x="520" y="232" class="dg-s">커밋 diff로 확인한 설정 변경 사실이며,</text>
+          <text x="520" y="250" class="dg-s">변경 전후 메모리 실측 로그는 없습니다.</text>
+        </svg>
+      </figure>
+
+      <div class="lesson">
+        <h3>배운 점</h3>
+        <p>OOM은 컨테이너 한도 / JVM 힙 / 호스트 중 어느 경계에서 났는지 먼저 나눠야 한다는 것을 이 과정에서 확인했습니다. 그 구분 없이 executor부터 줄인 것이 두 번째 단계였습니다.</p>
+      </div>
+    </section>
+
+    <section class="later" aria-labelledby="later-09">
+      <div class="later-tag"><b id="later-09">프로젝트 종료 후 개인 작업</b><span>2026.09. 이 블록의 수치는 프로젝트 기간 성과가 아닙니다.</span></div>
+
+      <p>추천 캐시의 일관성 결함을 순서대로 고쳤습니다. 조회·북마크 뒤 캐시 무효화 누락과, 캐시 삭제 실패가 뒤의 처리까지 막던 문제를 먼저 분리했고, 남은 것은 계산 도중 캐시가 무효화되면 오래된 결과가 다시 저장되는 경합이었습니다.</p>
+      <p>프로파일 <code>rev</code>를 <code>HINCRBY</code>로 먼저 올린 뒤 캐시를 지우고 서빙이 저장 직전에 <code>rev</code>를 비교하게 했는데, <strong>확인(GET)과 저장(SET)이 별개 왕복이라 그 사이가 그대로 경합 구간으로 남았습니다.</strong> 그래서 <code>HGET rev</code> 비교와 <code>SET PX</code>를 Lua 스크립트 하나로 묶어 원자화했습니다(단일 Redis 노드 전제라 Cluster에서는 해시 태그가 필요합니다).</p>
+
+      <figure class="scroll">
+        <svg viewBox="0 0 840 382" role="img" aria-labelledby="a3-t a3-d">
+          <title id="a3-t">재캐싱 경합과 Lua 원자화</title>
+          <desc id="a3-d">요청 A가 시작 시점 rev를 읽고 추천을 계산한 뒤 rev를 다시 확인합니다. 아직 같아서 저장을 진행하는데, 그 사이 이벤트 B가 rev를 올리고 캐시를 지웁니다. 그 뒤 A가 SET으로 이미 낡은 결과를 저장합니다. 확인과 저장을 Lua 스크립트 하나로 묶으면 이 사이에 다른 명령이 끼지 못합니다.</desc>
+          <defs>
+            <marker id="a3-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-arrow"/></marker>
+            <marker id="a3-ab" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-ab"/></marker>
+          </defs>
+          <rect x="0" y="162" width="840" height="140" style="fill:color-mix(in srgb, var(--before) 10%, transparent)"/>
+          <text x="8" y="296" class="dg-tb">경합 구간: 확인과 저장이 별개 왕복</text>
+          <!-- 레인 -->
+          <rect class="dg-box" x="10"  y="8" width="170" height="40"/><text x="95"  y="33" text-anchor="middle" class="dg-t">요청 A (추천 서빙)</text>
+          <rect class="dg-box" x="245" y="8" width="170" height="40"/><text x="330" y="33" text-anchor="middle" class="dg-t">이벤트 B (조회·북마크)</text>
+          <rect class="dg-box" x="475" y="8" width="170" height="40"/><text x="560" y="33" text-anchor="middle" class="dg-t">Redis: 프로파일 rev</text>
+          <rect class="dg-box" x="670" y="8" width="160" height="40"/><text x="750" y="33" text-anchor="middle" class="dg-t">Redis: 캐시 키</text>
+          <g class="dg-line dg-dash"><line x1="95" y1="48" x2="95" y2="316"/><line x1="330" y1="48" x2="330" y2="316"/><line x1="560" y1="48" x2="560" y2="316"/><line x1="750" y1="48" x2="750" y2="316"/></g>
+          <!-- 메시지 -->
+          <line class="dg-line" x1="95" y1="84" x2="557" y2="84" marker-end="url(#a3-a)"/>
+          <text x="104" y="77" class="dg-s">1  HGET rev: 시작 시점 값 r1</text>
+          <rect class="dg-chip" x="40" y="104" width="110" height="34"/><text x="95" y="126" text-anchor="middle" class="dg-s" style="fill:var(--ink)">2  추천 계산</text>
+          <line class="dg-line" x1="95" y1="184" x2="557" y2="184" marker-end="url(#a3-a)"/>
+          <text x="104" y="177" class="dg-s">3  HGET rev 재확인: 아직 r1이라 저장 진행</text>
+          <line class="dg-bad" x1="330" y1="222" x2="557" y2="222" marker-end="url(#a3-ab)"/>
+          <text x="338" y="215" class="dg-tb">4  HINCRBY rev → r2</text>
+          <line class="dg-bad" x1="330" y1="252" x2="747" y2="252" marker-end="url(#a3-ab)"/>
+          <text x="580" y="245" class="dg-tb">5  DEL</text>
+          <line class="dg-bad" x1="95" y1="284" x2="747" y2="284" marker-end="url(#a3-ab)"/>
+          <text x="420" y="277" class="dg-tb">6  SET: 이미 낡은 결과가 저장됨</text>
+          <!-- 비교 -->
+          <rect class="dg-risk" x="0" y="330" width="412" height="44"/>
+          <text x="14" y="350" class="dg-tb">GET + SET 두 왕복</text>
+          <text x="14" y="366" class="dg-s">3과 6 사이에 이벤트가 끼면 낡은 결과가 저장됨</text>
+          <rect class="dg-good-box" x="428" y="330" width="412" height="44"/>
+          <text x="442" y="350" class="dg-tg">Lua 스크립트 한 번 (EVAL)</text>
+          <text x="442" y="366" class="dg-s">rev 비교와 SET PX가 원자적으로 실행됨</text>
+        </svg>
+        <figcaption>1~2 사이의 무효화는 3의 revision 비교에서 이미 걸러집니다. Lua 원자화로 닫은 것은 3과 6 사이의 창입니다. 코드상 순서는 revision 증가가 캐시 삭제보다 먼저입니다.</figcaption>
+      </figure>
+
+      <p>검증은 실제 Redis에 붙는 통합 테스트 10개로 했습니다(Redis만 실물이고 PostgreSQL·리포지토리는 mock, 환경변수가 없으면 skip되는 조건부 테스트). 응답 시간이나 히트율 개선은 주장하지 않습니다. 다중 프로세스 수준의 경합은 <strong>아직 재현하지 못했습니다.</strong></p>
+
+      <p>같은 기간에 추천 API 응답 시간의 성립 조건을 좁히려고 다시 측정했습니다.</p>
+
+      <div class="measure" role="group" aria-labelledby="m013">
+        <div class="measure-head"><b id="m013">추천 API 응답 시간 (동시성 1)</b><span>M-013, M-014, M-015, 재현 실험</span></div>
+        <table>
+          <thead><tr><th scope="col">경로</th><th scope="col">p50</th><th scope="col" class="r">측정 위치</th></tr></thead>
+          <tbody>
+            <tr class="is-neutral"><th scope="row">캐시 히트</th><td class="v">0.45<small>ms</small></td><td class="r">서버 내부</td></tr>
+            <tr class="is-neutral"><th scope="row">캐시 미스</th><td class="v">5.14<small>ms</small></td><td class="r">클라이언트, p95 7.06ms</td></tr>
+            <tr class="is-neutral"><th scope="row">신규 사용자 폴백</th><td class="v">약 13<small>ms</small></td><td class="r">클라이언트, 캐시 저장 안 함</td></tr>
+          </tbody>
+        </table>
+        <dl>
+          <dt>조건</dt>
+          <dd>로컬 Docker(앱·Redis·PostgreSQL 컨테이너), 합성 데이터 뉴스 2만 / 논문 5천 / 사용자 1천, size=20 응답 약 8KB, 3회 × 2,000요청의 중앙값, 오류 0/108,000. 서버 내부 지연은 Tomcat access log, 클라이언트 지연은 하니스 발송부터 응답 완료까지로 나눠 쟀습니다.</dd>
+          <dt>범위</dt>
+          <dd>"50ms 이하"는 동시성 10 이하에서만 성립했습니다. 신규 사용자 폴백은 결과를 캐시에 저장하지 않아 매 요청 DB를 탑니다.</dd>
+        </dl>
+      </div>
+
+      <figure class="scroll">
+        <svg viewBox="0 0 840 220" role="img" aria-labelledby="a4-t a4-d">
+          <title id="a4-t">캐시 미스 경로 p95와 동시성</title>
+          <desc id="a4-d">캐시 미스 경로의 클라이언트 p95는 동시성 1에서 7.06ms, 10에서 11.33ms, 50에서 69.92ms로 50ms를 넘습니다.</desc>
+          <line class="dg-line" x1="80" y1="180" x2="620" y2="180"/>
+          <line class="dg-bad dg-dash" x1="80" y1="96" x2="620" y2="96"/>
+          <text x="628" y="100" class="dg-tb">50ms</text>
+          <g class="dg-s" text-anchor="middle">
+            <text x="170" y="202">동시성 1</text><text x="350" y="202">동시성 10</text><text x="530" y="202">동시성 50</text>
+          </g>
+          <line class="dg-line" x1="170" y1="180" x2="170" y2="168.2"/><circle cx="170" cy="168.2" r="6" style="fill:var(--ink)"><title>동시성 1: p95 7.06ms</title></circle>
+          <text x="182" y="164" class="dg-mi">7.06ms</text>
+          <line class="dg-line" x1="350" y1="180" x2="350" y2="161"/><circle cx="350" cy="161" r="6" style="fill:var(--ink)"><title>동시성 10: p95 11.33ms</title></circle>
+          <text x="362" y="157" class="dg-mi">11.33ms</text>
+          <line class="dg-line" x1="530" y1="180" x2="530" y2="62.5"/><circle cx="530" cy="62.5" r="6" style="fill:var(--before)"><title>동시성 50: p95 69.92ms</title></circle>
+          <text x="542" y="58" class="dg-mi" style="fill:var(--before)">69.92ms</text>
+          <text x="80" y="20" class="dg-h">캐시 미스 경로 클라이언트 p95</text>
+          <text x="80" y="40" class="dg-s">동시성은 순서형 구간이며 가로 간격은 비례하지 않습니다. 세로축은 0ms에서 시작합니다.</text>
+        </svg>
+      </figure>
+
+      <p>같은 실험에서 Redis를 완전히 정지시킨 상태도 시험했습니다. 이 상태에서는 추천 API가 클라이언트 타임아웃에 도달할 때까지 응답을 돌려주지 않았습니다(3회 호출 3회 모두 동일, 원인 미확인). 컨테이너 정지라는 한 가지 장애 형태만 본 것이고, Redis 장애를 받아내는 폴백 경로는 이번 재현 실험으로 확인한 추가 구현 과제입니다.</p>
+    </section>
+
+    <nav class="pager" aria-label="프로젝트 이동">
+      <a href="../butterfly/"><span>이전</span>Butterfly CRM</a>
+      <a href="../synapse/" style="text-align:right"><span>다음</span>SYNAPSE</a>
+    </nav>
+  </main>
+</div>
+
+<footer class="foot">
+  <div class="wrap">© 2026 이재영</div>
+</footer>
+<script src="../../assets/toc.js"></script>
+</body>
+</html>

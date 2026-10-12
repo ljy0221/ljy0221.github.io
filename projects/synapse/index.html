@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SYNAPSE · 이재영</title>
+<meta name="description" content="SYNAPSE: 코드 실행 환경과 실시간 편집. 세션 단위 컨테이너 재사용, 손익분기 재측정, Yjs 피드백 루프 차단, 블록 저장소 단일화 PoC.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;600&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">본문으로 건너뛰기</a>
+
+<header class="bar">
+  <div class="bar-inner">
+    <a class="bar-name" href="../../">이재영</a>
+    <nav aria-label="프로젝트">
+      <a href="../butterfly/">Butterfly</a>
+      <a href="../airadar/">AiRadar</a>
+      <a href="./" aria-current="page">SYNAPSE</a>
+      <a href="../galrae/">갈래말래</a>
+      <a href="../maeumssi/">마음씨</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap case">
+
+  <aside class="rail" aria-label="프로젝트 정보">
+    <dl>
+      <dt>기간</dt><dd>2026.01 – 02 (6주)</dd>
+      <dt>팀</dt><dd>6명 (백엔드 4, 프론트 2), 팀장</dd>
+      <dt>담당</dt><dd>백엔드: 코드 블록 저장, DB 설계, 블록 이력(MongoDB), AI 코드 리뷰·요약<br>프론트: Electron IPC 연결, 코드 블록, 코드 실행 세션</dd>
+      <dt>스택</dt><dd>Java 17, Spring Boot 3.5.9, PostgreSQL, MongoDB, Redis, Docker, Electron, TypeScript</dd>
+      <dt>레포</dt><dd><a href="https://github.com/ljy0221/SynapseNote">ljy0221/SynapseNote</a></dd>
+    </dl>
+    <nav class="toc" aria-label="이 페이지 목차">
+      <ol>
+        <li><a href="#session">세션 단위 컨테이너 재사용</a></li>
+        <li><a class="is-later" href="#later-09">손익분기 재측정</a></li>
+        <li><a href="#yjs">Yjs 피드백 루프</a></li>
+        <li><a class="is-later" href="#later-10">저장소 단일화 PoC</a></li>
+      </ol>
+    </nav>
+  </aside>
+
+  <main id="main" class="case-main">
+    <h1 class="case-title">SYNAPSE</h1>
+    <p class="case-sub">코드 실행 환경과 실시간 편집</p>
+
+    <p class="lede">여러 사용자가 문서를 동시에 편집하고 코드 셀을 실행하는 데스크톱 협업 노트입니다. 저는 팀장으로서 코드 실행 환경과 블록 저장 구조를 맡았습니다.</p>
+    <p>Yjs 실시간 동기화의 서버와 토큰 발급은 다른 팀원 영역이고, 저는 클라이언트 측 수정을 맡았습니다.</p>
+
+    <figure>
+      <div class="shot">
+        <img src="../../assets/img/synapse-architecture.png" width="2360" height="1236" loading="lazy" alt="SYNAPSE 전체 아키텍처. EC2 인스턴스 안에 Nginx와 Certbot, Docker Compose 스택(Jenkins, Frontend, YJS 서버, Backend/AI, Redis, PostgreSQL, Kurento)이 있고, MongoDB Atlas와 GitHub·Google OAuth, WebServer·Electron 클라이언트가 연결됩니다.">
+      </div>
+      <figcaption>팀 레포의 전체 아키텍처 그림입니다(<code>docs/images/architecture.png</code>, 팀 공동 작성). 이 중 Backend의 코드 블록 저장과 Electron 클라이언트의 코드 실행 경로가 제 담당입니다.</figcaption>
+    </figure>
+
+    <section aria-labelledby="session">
+      <h2 id="session">코드 실행 격리 단위 변경: 세션 단위 컨테이너 재사용</h2>
+
+      <div class="step"><h3>문제</h3><div>
+        <p>사용자가 작성한 코드를 그대로 실행하는 기능이라 초기 설계의 전제는 "실행 단위로 완전히 격리해야 한다"였습니다. 블록을 실행할 때마다 임시 파일을 만들고 <code>docker run --rm</code>으로 새 컨테이너를 띄운 뒤 종료·삭제했습니다.</p>
+        <p>그 격리 비용은 두 갈래로 돌아왔습니다. 실행마다 컨테이너 기동·정리 시간이 그대로 지연에 얹혔고, 동시에 뜨는 컨테이너 수만큼 리소스 부담도 커졌습니다.</p>
+      </div></div>
+      <div class="step"><h3>해결</h3><div>
+        <p>격리 단위를 실행에서 세션으로 낮췄습니다. 처음에 완전 격리를 전제로 설계한 것도, 지연과 리소스 부담을 보고 세션 재사용으로 전환하기로 한 것도 제 판단입니다. 팀장으로서 이 전환을 말로 설득하는 대신 세션 재사용 프로토타입을 먼저 구현해 처리 속도 차이를 보여주고 팀의 동의를 얻었습니다.</p>
+        <p>세션 키를 <code>noteId:language</code>로 두고 <code>docker run -d -i</code>로 REPL 컨테이너를 유지한 뒤 <code>docker attach</code>로 stdin에 코드를 넣었습니다. 실행 종료 판정은 실행마다 고유한 endMarker를 코드 뒤에 출력시키고 50ms 폴링으로 검출하는 방식을 골랐습니다. 지연 하한이 생기는 대신 언어별 REPL 프롬프트 처리에 의존하지 않습니다. 출력이 뒤섞이지 않도록 세션별 실행 큐로 직렬화했고, REPL 구조와 맞지 않는 Java는 단일 실행 모드로 폴백합니다.</p>
+      </div></div>
+      <div class="step"><h3>대가</h3><div>
+        <p>같은 세션 안에서는 블록 간 상태가 공유되므로 격리를 일부 포기합니다. 긴 블록이 뒤를 막는 것도 실행 큐의 대가입니다.</p>
+      </div></div>
+
+      <figure class="scroll">
+        <svg viewBox="0 0 840 296" role="img" aria-labelledby="s1-t s1-d">
+          <title id="s1-t">실행 단위 격리와 세션 단위 재사용</title>
+          <desc id="s1-d">개선 전에는 실행마다 임시 파일을 만들고 docker run --rm으로 새 컨테이너를 띄운 뒤 종료·삭제했습니다. 개선 후에는 noteId와 language로 세션을 찾아, 없으면 REPL 컨테이너를 띄워 유지하고, 있으면 docker attach로 stdin에 코드를 넣은 뒤 endMarker를 50ms 폴링으로 검출합니다.</desc>
+          <defs>
+            <marker id="s1-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-arrow"/></marker>
+            <marker id="s1-ab" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-ab"/></marker>
+          </defs>
+          <text x="0" y="40" class="dg-tb">개선 전</text>
+          <text x="0" y="58" class="dg-s">실행마다</text>
+          <rect class="dg-bad-box" x="100" y="20" width="160" height="48"/><text x="180" y="49" text-anchor="middle" class="dg-t">임시 파일 생성</text>
+          <rect class="dg-bad-box" x="290" y="20" width="200" height="48"/><text x="390" y="42" text-anchor="middle" class="dg-mi">docker run --rm</text><text x="390" y="59" text-anchor="middle" class="dg-s">새 컨테이너 기동</text>
+          <rect class="dg-bad-box" x="520" y="20" width="160" height="48"/><text x="600" y="49" text-anchor="middle" class="dg-t">종료·삭제</text>
+          <line class="dg-line" x1="260" y1="44" x2="287" y2="44" marker-end="url(#s1-a)"/>
+          <line class="dg-line" x1="490" y1="44" x2="517" y2="44" marker-end="url(#s1-a)"/>
+          <path class="dg-bad dg-dash" d="M600,68 V86 H180 V72" marker-end="url(#s1-ab)"/>
+          <text x="390" y="102" text-anchor="middle" class="dg-tb">다음 실행도 처음부터</text>
+
+          <text x="0" y="150" class="dg-tg">개선 후</text>
+          <text x="0" y="168" class="dg-s">세션 재사용</text>
+          <rect class="dg-good-box" x="100" y="130" width="160" height="56"/><text x="180" y="153" text-anchor="middle" class="dg-t">세션 조회</text><text x="180" y="172" text-anchor="middle" class="dg-mi">noteId:language</text>
+          <line class="dg-line" x1="260" y1="158" x2="287" y2="158" marker-end="url(#s1-a)"/>
+          <text x="274" y="148" text-anchor="middle" class="dg-s">있음</text>
+          <rect class="dg-good-box" x="290" y="130" width="200" height="56"/><text x="390" y="153" text-anchor="middle" class="dg-mi">docker attach</text><text x="390" y="172" text-anchor="middle" class="dg-s">stdin에 코드 주입</text>
+          <line class="dg-line" x1="490" y1="158" x2="517" y2="158" marker-end="url(#s1-a)"/>
+          <rect class="dg-good-box" x="520" y="130" width="200" height="56"/><text x="620" y="153" text-anchor="middle" class="dg-t">endMarker 검출</text><text x="620" y="172" text-anchor="middle" class="dg-s">50ms 폴링</text>
+          <path class="dg-line" d="M180,186 V222 H287" marker-end="url(#s1-a)"/>
+          <text x="190" y="212" class="dg-s">없음 (첫 실행)</text>
+          <rect class="dg-box" x="290" y="200" width="200" height="48"/><text x="390" y="222" text-anchor="middle" class="dg-mi">docker run -d -i</text><text x="390" y="239" text-anchor="middle" class="dg-s">REPL 컨테이너 유지</text>
+          <path class="dg-line" d="M490,224 H505 V158"/>
+          <text x="100" y="278" class="dg-s">세션별 실행 큐로 직렬화하고, REPL 구조와 맞지 않는 Java는 단일 실행 모드로 폴백합니다.</text>
+        </svg>
+      </figure>
+
+      <div class="lesson">
+        <h3>결과와 배운 점</h3>
+        <p>두 번째 실행부터 컨테이너 기동·정리 비용이 사라졌습니다. 대신 세션을 처음 여는 실행에는 컨테이너 기동과 attach 후 고정 1초 대기가 코드상 그대로 남아 있어, 이 결정의 이득은 한 노트에서 같은 언어를 여러 번 실행하는 패턴에서만 나옵니다. 수치는 프로젝트 종료 후 측정한 것이라 아래에 따로 적었습니다.</p>
+        <p>재사용 최적화에는 손익분기가 있습니다. "평균이 빨라졌다"가 아니라 "어떤 사용 패턴에서 이득인가"로 말해야 한다는 것이 이 작업의 결론입니다. 재작성 과정에서 유휴 정리 기준이 마지막 사용이 아니라 세션 생성 시점이 된 것으로 코드상 보이지만 재현은 하지 않았습니다.</p>
+      </div>
+    </section>
+
+    <section class="later" aria-labelledby="later-09">
+      <div class="later-tag"><b id="later-09">프로젝트 종료 후 개인 작업</b><span>2026.09. 이 블록의 수치는 프로젝트 기간 성과가 아닙니다.</span></div>
+      <p>도입 직전 커밋과 현재 코드를 각각 체크아웃해 다시 측정했습니다.</p>
+
+      <div class="measure" role="group" aria-labelledby="m010">
+        <div class="measure-head"><b id="m010">코드 셀 실행 지연 (평균)</b><span>M-010, M-011</span></div>
+        <table>
+          <thead><tr><th scope="col">구분</th><th scope="col">python</th><th scope="col">javascript</th></tr></thead>
+          <tbody>
+            <tr class="is-before"><th scope="row">도입 전: 단일 실행</th><td class="v">359.5<small>ms</small></td><td class="v">385.1<small>ms</small></td></tr>
+            <tr class="is-after"><th scope="row">세션 warm</th><td class="v">151.8<small>ms</small></td><td class="v">161.7<small>ms</small></td></tr>
+            <tr class="is-neutral"><th scope="row">세션 cold (첫 실행)</th><td class="v">약 1.5<small>초</small></td><td class="v">약 1.5<small>초</small></td></tr>
+          </tbody>
+        </table>
+        <dl>
+          <dt>조건</dt>
+          <dd>Windows 11 / i5-12400 / Docker Desktop. 실행 코드가 <code>print(1+1)</code> 수준이라 컨테이너 오버헤드의 하한값입니다. 도입 전 n=60, 세션 warm n=30, 이미지 사전 pull(시간 제외), 실패 0건. 세션 warm에는 도입 전에는 없던 이미지 확인 호출(약 90ms)이 포함되며, 이는 차이를 줄이는 방향입니다.</dd>
+          <dt>범위</dt>
+          <dd>세션 cold는 언어별 1회 측정이라 통계적으로 약해 소수점을 쓰지 않았습니다. 단일 실행보다 느립니다.</dd>
+        </dl>
+      </div>
+
+      <p>이 기능은 주피터 노트북의 코드 셀처럼, 한 노트에서 같은 언어의 코드를 여러 번 실행하는 사용 패턴을 전제로 설계했습니다. 누적 시간으로 계산하면 <strong>도입 전 단일 실행 기준으로 7번째 실행부터</strong> 이득이 나기 시작합니다.</p>
+
+      <figure class="scroll">
+        <p class="chart-legend" aria-hidden="true" style="margin:0 0 8px;font-size:14px;display:flex;flex-wrap:wrap;gap:6px 18px">
+          <span><svg width="26" height="10"><line x1="0" y1="5" x2="26" y2="5" style="stroke:var(--after);stroke-width:2.4"/></svg> 세션 재사용</span>
+          <span><svg width="26" height="10"><line x1="0" y1="5" x2="26" y2="5" style="stroke:var(--before);stroke-width:2"/></svg> 단일 실행: 도입 전</span>
+          <span><svg width="26" height="10"><line x1="0" y1="5" x2="26" y2="5" style="stroke:var(--before);stroke-width:2;stroke-dasharray:6 4"/></svg> 단일 실행: 현재</span>
+        </p>
+<svg class="chart" viewBox="0 0 840 350" role="img" aria-labelledby="c1-t c1-d">
+<title id="c1-t">실행 횟수별 누적 시간 손익분기 (python)</title>
+<desc id="c1-d">세션 재사용은 첫 실행 1,474ms 뒤 회당 151.8ms, 도입 전 단일 실행은 회당 359.5ms, 현재 단일 실행은 회당 503ms. 도입 전 단일 기준 7번째, 현재 단일 기준 4번째 실행부터 세션 재사용의 누적 시간이 더 짧습니다.</desc>
+<line class="ax0" x1="60" y1="300.0" x2="600" y2="300.0"/>
+<text class="tk" x="52" y="304.0" text-anchor="end">0</text>
+<line class="ax" x1="60" y1="250.9" x2="600" y2="250.9"/>
+<text class="tk" x="52" y="254.9" text-anchor="end">1,000</text>
+<line class="ax" x1="60" y1="201.8" x2="600" y2="201.8"/>
+<text class="tk" x="52" y="205.8" text-anchor="end">2,000</text>
+<line class="ax" x1="60" y1="152.7" x2="600" y2="152.7"/>
+<text class="tk" x="52" y="156.7" text-anchor="end">3,000</text>
+<line class="ax" x1="60" y1="103.6" x2="600" y2="103.6"/>
+<text class="tk" x="52" y="107.6" text-anchor="end">4,000</text>
+<line class="ax" x1="60" y1="54.5" x2="600" y2="54.5"/>
+<text class="tk" x="52" y="58.5" text-anchor="end">5,000</text>
+<text class="tk" x="60" y="318" text-anchor="middle">1</text>
+<text class="tk" x="120" y="318" text-anchor="middle">2</text>
+<text class="tk" x="180" y="318" text-anchor="middle">3</text>
+<text class="tk" x="240" y="318" text-anchor="middle">4</text>
+<text class="tk" x="300" y="318" text-anchor="middle">5</text>
+<text class="tk" x="360" y="318" text-anchor="middle">6</text>
+<text class="tk" x="420" y="318" text-anchor="middle">7</text>
+<text class="tk" x="480" y="318" text-anchor="middle">8</text>
+<text class="tk" x="540" y="318" text-anchor="middle">9</text>
+<text class="tk" x="600" y="318" text-anchor="middle">10</text>
+<text class="tk" x="330" y="342" text-anchor="middle">실행 횟수</text>
+<text class="tk" x="60" y="18" text-anchor="start">누적 시간 (ms)</text>
+<polyline class="ln-before-now" points="60,275.3 120,250.6 180,225.9 240,201.2 300,176.5 360,151.8 420,127.2 480,102.5 540,77.8 600,53.1"/>
+<polyline class="ln-before" points="60,282.4 120,264.7 180,247.1 240,229.4 300,211.8 360,194.1 420,176.5 480,158.8 540,141.2 600,123.5"/>
+<polyline class="ln-after" points="60,227.6 120,220.2 180,212.7 240,205.3 300,197.8 360,190.4 420,182.9 480,175.5 540,168.0 600,160.6"/>
+<circle class="pt pt-before" cx="60" cy="275.3" r="4"><title>단일 실행 현재, 1번째: 누적 503ms</title></circle>
+<circle class="pt pt-before" cx="120" cy="250.6" r="4"><title>단일 실행 현재, 2번째: 누적 1,006ms</title></circle>
+<circle class="pt pt-before" cx="180" cy="225.9" r="4"><title>단일 실행 현재, 3번째: 누적 1,509ms</title></circle>
+<circle class="pt pt-before" cx="240" cy="201.2" r="4"><title>단일 실행 현재, 4번째: 누적 2,012ms</title></circle>
+<circle class="pt pt-before" cx="300" cy="176.5" r="4"><title>단일 실행 현재, 5번째: 누적 2,515ms</title></circle>
+<circle class="pt pt-before" cx="360" cy="151.8" r="4"><title>단일 실행 현재, 6번째: 누적 3,018ms</title></circle>
+<circle class="pt pt-before" cx="420" cy="127.2" r="4"><title>단일 실행 현재, 7번째: 누적 3,521ms</title></circle>
+<circle class="pt pt-before" cx="480" cy="102.5" r="4"><title>단일 실행 현재, 8번째: 누적 4,024ms</title></circle>
+<circle class="pt pt-before" cx="540" cy="77.8" r="4"><title>단일 실행 현재, 9번째: 누적 4,527ms</title></circle>
+<circle class="pt pt-before" cx="600" cy="53.1" r="4"><title>단일 실행 현재, 10번째: 누적 5,030ms</title></circle>
+<circle class="pt pt-before" cx="60" cy="282.4" r="4"><title>단일 실행 도입 전, 1번째: 누적 360ms</title></circle>
+<circle class="pt pt-before" cx="120" cy="264.7" r="4"><title>단일 실행 도입 전, 2번째: 누적 719ms</title></circle>
+<circle class="pt pt-before" cx="180" cy="247.1" r="4"><title>단일 실행 도입 전, 3번째: 누적 1,078ms</title></circle>
+<circle class="pt pt-before" cx="240" cy="229.4" r="4"><title>단일 실행 도입 전, 4번째: 누적 1,438ms</title></circle>
+<circle class="pt pt-before" cx="300" cy="211.8" r="4"><title>단일 실행 도입 전, 5번째: 누적 1,798ms</title></circle>
+<circle class="pt pt-before" cx="360" cy="194.1" r="4"><title>단일 실행 도입 전, 6번째: 누적 2,157ms</title></circle>
+<circle class="pt pt-before" cx="420" cy="176.5" r="4"><title>단일 실행 도입 전, 7번째: 누적 2,516ms</title></circle>
+<circle class="pt pt-before" cx="480" cy="158.8" r="4"><title>단일 실행 도입 전, 8번째: 누적 2,876ms</title></circle>
+<circle class="pt pt-before" cx="540" cy="141.2" r="4"><title>단일 실행 도입 전, 9번째: 누적 3,236ms</title></circle>
+<circle class="pt pt-before" cx="600" cy="123.5" r="4"><title>단일 실행 도입 전, 10번째: 누적 3,595ms</title></circle>
+<circle class="pt pt-after" cx="60" cy="227.6" r="4"><title>세션 재사용, 1번째: 누적 1,474ms</title></circle>
+<circle class="pt pt-after" cx="120" cy="220.2" r="4"><title>세션 재사용, 2번째: 누적 1,626ms</title></circle>
+<circle class="pt pt-after" cx="180" cy="212.7" r="4"><title>세션 재사용, 3번째: 누적 1,778ms</title></circle>
+<circle class="pt pt-after" cx="240" cy="205.3" r="4"><title>세션 재사용, 4번째: 누적 1,929ms</title></circle>
+<circle class="pt pt-after" cx="300" cy="197.8" r="4"><title>세션 재사용, 5번째: 누적 2,081ms</title></circle>
+<circle class="pt pt-after" cx="360" cy="190.4" r="4"><title>세션 재사용, 6번째: 누적 2,233ms</title></circle>
+<circle class="pt pt-after" cx="420" cy="182.9" r="4"><title>세션 재사용, 7번째: 누적 2,385ms</title></circle>
+<circle class="pt pt-after" cx="480" cy="175.5" r="4"><title>세션 재사용, 8번째: 누적 2,537ms</title></circle>
+<circle class="pt pt-after" cx="540" cy="168.0" r="4"><title>세션 재사용, 9번째: 누적 2,688ms</title></circle>
+<circle class="pt pt-after" cx="600" cy="160.6" r="4"><title>세션 재사용, 10번째: 누적 2,840ms</title></circle>
+<line class="ax0" x1="420" y1="190.9" x2="420" y2="300" stroke-dasharray="3 3"/>
+<text x="426" y="210.9" style="font:600 13px var(--sans);fill:var(--ink)">7번째부터 이득 (도입 전 단일 기준)</text>
+<line class="ax0" x1="240" y1="213.3" x2="240" y2="300" stroke-dasharray="3 3"/>
+<text x="246" y="245.3" style="font:400 12px var(--sans);fill:var(--ink)">4번째 (현재 단일 기준)</text>
+<text class="tk" x="610" y="57.1" style="fill:var(--ink)">단일 실행: 현재 (503ms/회)</text>
+<text class="tk" x="610" y="127.5" style="fill:var(--ink)">단일 실행: 도입 전 (359.5ms/회)</text>
+<text class="tk" x="610" y="156.6" style="fill:var(--ink)">세션 재사용</text>
+<text class="tk" x="610" y="172.6">첫 실행 1,474ms + 151.8ms/회</text>
+</svg>
+        <figcaption>python 기준 누적 시간입니다. 두 축 모두 0에서 시작합니다. 점에 마우스를 올리면 값이 보입니다. 교차점은 측정 평균으로 계산한 파생값입니다.</figcaption>
+        <details class="chart-data">
+          <summary>표로 보기</summary>
+          <table>
+            <thead><tr><th>실행 횟수</th><th>세션 재사용</th><th>단일: 도입 전</th><th>단일: 현재</th></tr></thead>
+            <tbody>
+              <tr><td>1</td><td>1,474.0ms</td><td>359.5ms</td><td>503ms</td></tr>
+              <tr><td>2</td><td>1,625.8ms</td><td>719.0ms</td><td>1,006ms</td></tr>
+              <tr><td>3</td><td>1,777.6ms</td><td>1,078.5ms</td><td>1,509ms</td></tr>
+              <tr><td>4</td><td>1,929.4ms</td><td>1,438.0ms</td><td>2,012ms</td></tr>
+              <tr><td>5</td><td>2,081.2ms</td><td>1,797.5ms</td><td>2,515ms</td></tr>
+              <tr><td>6</td><td>2,233.0ms</td><td>2,157.0ms</td><td>3,018ms</td></tr>
+              <tr><td>7</td><td>2,384.8ms</td><td>2,516.5ms</td><td>3,521ms</td></tr>
+              <tr><td>8</td><td>2,536.6ms</td><td>2,876.0ms</td><td>4,024ms</td></tr>
+              <tr><td>9</td><td>2,688.4ms</td><td>3,235.5ms</td><td>4,527ms</td></tr>
+              <tr><td>10</td><td>2,840.2ms</td><td>3,595.0ms</td><td>5,030ms</td></tr>
+            </tbody>
+          </table>
+        </details>
+      </figure>
+    </section>
+
+    <section aria-labelledby="yjs">
+      <h2 id="yjs">Yjs 피드백 루프 차단과 블록 이력 모델링</h2>
+      <p>팀이 구현한 Yjs 실시간 동기화에서 외부 값을 반영하면 그 반영이 다시 변경 이벤트를 일으켜 돌아오는 피드백 루프가 있었습니다. programmatic dispatch 구간에서 이 루프를 차단하도록 클라이언트 측을 수정했습니다. 블록 이력은 MongoDB 문서로 모델링해 (블록, 슬롯) 유니크 인덱스를 정의했습니다.</p>
+
+      <figure class="scroll">
+        <svg viewBox="0 0 840 230" role="img" aria-labelledby="s2-t s2-d">
+          <title id="s2-t">Yjs 피드백 루프와 차단 지점</title>
+          <desc id="s2-d">원격 변경을 에디터에 programmatic dispatch로 반영하면 변경 이벤트가 생기고, 그 이벤트가 다시 Yjs로 전송되어 되돌아옵니다. dispatch 구간에서 발생한 변경 이벤트는 다시 보내지 않도록 차단했습니다.</desc>
+          <defs>
+            <marker id="s2-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-arrow"/></marker>
+            <marker id="s2-ab" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-ab"/></marker>
+          </defs>
+          <rect class="dg-box" x="0" y="40" width="180" height="56"/><text x="90" y="64" text-anchor="middle" class="dg-t">Yjs 문서</text><text x="90" y="83" text-anchor="middle" class="dg-s">원격 변경 수신</text>
+          <rect class="dg-own" x="230" y="40" width="190" height="56"/><text x="325" y="64" text-anchor="middle" class="dg-t">에디터에 반영</text><text x="325" y="83" text-anchor="middle" class="dg-s">programmatic dispatch</text>
+          <rect class="dg-own" x="470" y="40" width="170" height="56"/><text x="555" y="64" text-anchor="middle" class="dg-t">변경 이벤트</text><text x="555" y="83" text-anchor="middle" class="dg-s">에디터가 발생시킴</text>
+          <line class="dg-line" x1="180" y1="68" x2="227" y2="68" marker-end="url(#s2-a)"/>
+          <line class="dg-line" x1="420" y1="68" x2="467" y2="68" marker-end="url(#s2-a)"/>
+          <path class="dg-bad dg-dash" d="M555,96 V150 H90 V100" marker-end="url(#s2-ab)"/>
+          <text x="322" y="168" text-anchor="middle" class="dg-tb">다시 Yjs로 전송되어 되돌아옴</text>
+          <g transform="translate(555 150)"><path d="M-9,-9 L9,9 M9,-9 L-9,9" style="stroke:var(--after);stroke-width:3"/></g>
+          <rect class="dg-good-box" x="660" y="40" width="180" height="56"/><text x="750" y="64" text-anchor="middle" class="dg-tg">dispatch 구간 차단</text><text x="750" y="83" text-anchor="middle" class="dg-s">이 구간의 이벤트는 전송 안 함</text>
+          <line class="dg-good" x1="640" y1="68" x2="660" y2="68"/>
+          <text x="0" y="214" class="dg-s">굵은 테두리가 제가 수정한 클라이언트 쪽 구간입니다. Yjs 서버와 토큰 발급은 다른 팀원 영역입니다.</text>
+        </svg>
+      </figure>
+    </section>
+
+    <section class="later" aria-labelledby="later-10">
+      <div class="later-tag"><b id="later-10">프로젝트 종료 후 개인 작업</b><span>2026.10</span></div>
+      <p>블록 저장소를 PostgreSQL + MongoDB에서 PostgreSQL 하나로 합쳐도 되는지 PoC로 확인했습니다. 저장소 접근을 인터페이스 뒤로 분리하고 PG JSONB 어댑터를 붙여, 같은 데이터와 시나리오로 세 구성을 비교했습니다.</p>
+
+      <div class="measure" role="group" aria-labelledby="m022">
+        <div class="measure-head"><b id="m022">이력 5,000건 블록의 단건 지연 (median)</b><span>M-022</span></div>
+        <table>
+          <thead><tr><th scope="col">구성</th><th scope="col">조회 후 전체 저장</th><th scope="col">부분 갱신</th></tr></thead>
+          <tbody>
+            <tr class="is-neutral"><th scope="row">현행: Mongo</th><td class="v">16.8<small>ms</small></td><td class="v">4.3<small>ms</small></td></tr>
+            <tr class="is-before"><th scope="row">PG: 이력을 JSONB 배열로</th><td class="v">36.0<small>ms</small></td><td class="v">25.6<small>ms</small></td></tr>
+            <tr class="is-after"><th scope="row">PG: 이력 테이블 분리</th><td class="v">1.3<small>ms</small></td><td class="v">1.3<small>ms</small></td></tr>
+          </tbody>
+        </table>
+        <dl>
+          <dt>조건</dt>
+          <dd>시나리오 M(100노트 × 500블록). JSONB 배열 구성은 이력 길이에 비례해 느려졌고(500건 4.87ms, 2,000건 18.04ms, 5,000건 36.01ms), 이력 분리 구성은 1.07~1.32ms로 일정했습니다. 이력 0건에서는 세 구성 모두 1.1~1.4ms로 차이가 없었습니다.</dd>
+          <dt>범위</dt>
+          <dd>Node 클라이언트와 Docker Desktop 환경 값이라 Java 서비스의 절대값이 아닙니다. 현행 3DB에서 이력만 분리하는 비교군은 시험하지 않았습니다.</dd>
+        </dl>
+      </div>
+
+      <figure>
+        <figcaption style="margin:0 0 10px;color:var(--ink);font-weight:600">노트 삭제 정합성: 장애 주입 10건 (M-023)</figcaption>
+        <div class="units">
+          <div class="unit-row">
+            <b>현행 PG + Mongo<small>Mongo 컨테이너를 중지한 뒤 노트 삭제</small></b>
+            <div class="unit-cells" role="img" aria-label="10건 모두 불일치: 노트는 지워지고 블록이 남음"><i class="u-bad"></i><i class="u-bad"></i><i class="u-bad"></i><i class="u-bad"></i><i class="u-bad"></i><i class="u-bad"></i><i class="u-bad"></i><i class="u-bad"></i><i class="u-bad"></i><i class="u-bad"></i><em style="color:var(--before)">불일치 10건</em></div>
+          </div>
+          <div class="unit-row">
+            <b>PG 단일 트랜잭션<small>두 갱신 사이에 예외 주입</small></b>
+            <div class="unit-cells" role="img" aria-label="10건 모두 롤백, 불일치 0건"><i class="u-good"></i><i class="u-good"></i><i class="u-good"></i><i class="u-good"></i><i class="u-good"></i><i class="u-good"></i><i class="u-good"></i><i class="u-good"></i><i class="u-good"></i><i class="u-good"></i><em style="color:var(--after)">롤백 10건, 불일치 0건</em></div>
+          </div>
+        </div>
+        <figcaption>발생 빈도가 아니라 불일치가 생길 수 있음을 보이는 동작 시연입니다. 장애를 넣는 방식이 두 구성에서 다릅니다(컨테이너 중지 / 예외 주입).</figcaption>
+      </figure>
+
+      <p>결론은 "PG 하나로 가능, 단 이력 분리가 조건"입니다. 반대 결과도 있었습니다. 단건 속성 갱신은 노트당 5,000블록 시나리오에서 Mongo가 0.35ms, PG가 0.88~1.69ms(이력 분리 / JSONB 배열 구성)로 Mongo가 빨랐습니다(절대 차이 약 1ms). 5,000건은 극단적인 길이이고 500건 미만에서는 차이가 수 ms 이내였습니다. 이력 분리 구성과 Yjs 서버의 영속 계층 이전은 구현하지 않고 벤치로만 확인했으며, 이전을 결정하기 전에 Java 하네스로 재측정해야 합니다.</p>
+    </section>
+
+    <nav class="pager" aria-label="프로젝트 이동">
+      <a href="../airadar/"><span>이전</span>AiRadar</a>
+      <a href="../galrae/" style="text-align:right"><span>다음</span>갈래말래</a>
+    </nav>
+  </main>
+</div>
+
+<footer class="foot">
+  <div class="wrap">© 2026 이재영</div>
+</footer>
+<script src="../../assets/toc.js"></script>
+</body>
+</html>

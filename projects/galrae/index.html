@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>갈래말래 · 이재영</title>
+<meta name="description" content="갈래말래: 여유 시간 기반 놀거리 추천의 공간 검색. 바운딩 박스와 정밀 거리의 2단 필터, SRID 속성과 SPATIAL INDEX 재현 실험.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;600&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">본문으로 건너뛰기</a>
+
+<header class="bar">
+  <div class="bar-inner">
+    <a class="bar-name" href="../../">이재영</a>
+    <nav aria-label="프로젝트">
+      <a href="../butterfly/">Butterfly</a>
+      <a href="../airadar/">AiRadar</a>
+      <a href="../synapse/">SYNAPSE</a>
+      <a href="./" aria-current="page">갈래말래</a>
+      <a href="../maeumssi/">마음씨</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap case">
+
+  <aside class="rail" aria-label="프로젝트 정보">
+    <dl>
+      <dt>기간</dt><dd>2025.11 – 12 (WBS 기준)</dd>
+      <dt>팀</dt><dd>2명</dd>
+      <dt>담당</dt><dd>hotplace·review 도메인, AI 서버(RAG 기반 장소 Q&amp;A·소개문 생성), 공공데이터 연동, AI 서버 배포와 GitLab CI/CD</dd>
+      <dt>스택</dt><dd>Java 17, Spring Boot 3.4.12, MyBatis, MySQL 8(공간 함수), Python, FastAPI, AWS EC2, GitLab CI/CD</dd>
+      <dt>레포</dt><dd><a href="https://github.com/ljy0221/SpontaneousTrip">ljy0221/SpontaneousTrip</a></dd>
+    </dl>
+    <nav class="toc" aria-label="이 페이지 목차">
+      <ol>
+        <li><a href="#search">2단 필터 반경 검색</a></li>
+        <li><a class="is-later" href="#later-09">공간 인덱스 재현 실험</a></li>
+      </ol>
+    </nav>
+  </aside>
+
+  <main id="main" class="case-main">
+    <h1 class="case-title">갈래말래</h1>
+    <p class="case-sub">여유 시간 기반 놀거리 추천의 공간 검색</p>
+
+    <p class="lede">남은 시간 안에 갈 수 있는 놀거리를 추천하는 서비스입니다. 2인 팀에서 hotplace 도메인과 반경 검색을 맡았고, 통합 서버 배포와 인증은 다른 팀원 영역입니다.</p>
+
+    <section aria-labelledby="search">
+      <h2 id="search">바운딩 박스와 정밀 거리의 2단 필터</h2>
+
+      <div class="step"><h3>문제</h3><div>
+        <p>"남은 시간 안에 갈 수 있는 곳"을 레포 덤프 기준 약 5만 행 규모의 좌표 데이터에서 찾아야 했습니다(전량 이관 시 hotplace 50,915행, 로컬 재현 기준이며 운영 DB 건수는 확인하지 못했습니다).</p>
+      </div></div>
+      <div class="step"><h3>해결</h3><div>
+        <p>정밀 거리 계산을 전 행에 돌리는 비용을 줄이려고 검색 구조를 2단 필터로 정했습니다. 교통수단별 속도로 반경을 정해 바운딩 박스를 만들고, <code>MBRContains</code>로 후보를 좁힌 뒤 <code>ST_Distance_Sphere</code>로 정밀 거리를 거릅니다.</p>
+      </div></div>
+
+      <figure class="scroll">
+        <svg viewBox="0 0 840 300" role="img" aria-labelledby="g1-t g1-d">
+          <title id="g1-t">2단 필터 반경 검색</title>
+          <desc id="g1-d">현재 위치를 중심으로 반경 원과 그 원을 감싸는 바운딩 박스가 있습니다. 박스 밖의 점은 MBRContains 단계에서 빠지고, 박스 안이지만 원 밖인 모서리의 점은 ST_Distance_Sphere 단계에서 빠지며, 원 안의 점만 결과로 남습니다.</desc>
+          <defs><marker id="g1-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-arrow"/></marker></defs>
+          <!-- 지도 -->
+          <rect x="40" y="30" width="240" height="240" class="dg-group"/>
+          <circle cx="160" cy="150" r="120" style="fill:color-mix(in srgb, var(--after) 8%, transparent);stroke:var(--after);stroke-width:1.6"/>
+          <g style="fill:none;stroke:var(--graphite);stroke-width:1.2">
+            <circle cx="16" cy="48" r="5"/><circle cx="304" cy="96" r="5"/><circle cx="310" cy="236" r="5"/><circle cx="20" cy="196" r="5"/><circle cx="300" cy="22" r="5"/>
+          </g>
+          <g style="fill:var(--before)">
+            <circle cx="58" cy="48" r="5"/><circle cx="264" cy="256" r="5"/><circle cx="268" cy="46" r="5"/><circle cx="56" cy="252" r="5"/>
+          </g>
+          <g style="fill:var(--after)">
+            <circle cx="126" cy="112" r="5"/><circle cx="190" cy="176" r="5"/><circle cx="146" cy="214" r="5"/><circle cx="210" cy="104" r="5"/><circle cx="96" cy="170" r="5"/><circle cx="232" cy="150" r="5"/>
+          </g>
+          <path d="M152,150 H168 M160,142 V158" style="stroke:var(--ink);stroke-width:2"/>
+          <text x="168" y="144" class="dg-s" style="fill:var(--ink)">현재 위치</text>
+          <line class="dg-line dg-dash" x1="160" y1="150" x2="245" y2="65"/>
+          <text x="214" y="98" class="dg-s">반경</text>
+          <!-- 단계 -->
+          <rect class="dg-box" x="360" y="20" width="480" height="54"/>
+          <text x="378" y="43" class="dg-t">1  교통수단별 속도로 반경 계산</text>
+          <text x="378" y="62" class="dg-s">남은 시간과 이동 수단이 반경을 정함</text>
+          <rect class="dg-box" x="360" y="92" width="480" height="54"/>
+          <text x="378" y="115" class="dg-t">2  바운딩 박스 + <tspan class="dg-mi" style="font-weight:600">MBRContains</tspan>로 후보 축소</text>
+          <text x="378" y="134" class="dg-s">점선 상자 밖의 점(빈 원)이 빠짐</text>
+          <rect class="dg-box" x="360" y="164" width="480" height="54"/>
+          <text x="378" y="187" class="dg-t">3  <tspan class="dg-mi" style="font-weight:600">ST_Distance_Sphere</tspan>로 정밀 거리 필터</text>
+          <text x="378" y="206" class="dg-s">상자 안이지만 원 밖인 모서리의 점(<tspan class="dg-tb">빨강</tspan>)이 빠짐</text>
+          <rect class="dg-good-box" x="360" y="236" width="480" height="44"/>
+          <text x="378" y="263" class="dg-tg">결과: 원 안의 점만 남음</text>
+          <line class="dg-line" x1="600" y1="74" x2="600" y2="89" marker-end="url(#g1-a)"/>
+          <line class="dg-line" x1="600" y1="146" x2="600" y2="161" marker-end="url(#g1-a)"/>
+          <line class="dg-line" x1="600" y1="218" x2="600" y2="233" marker-end="url(#g1-a)"/>
+        </svg>
+      </figure>
+    </section>
+
+    <section class="later" aria-labelledby="later-09">
+      <div class="later-tag"><b id="later-09">프로젝트 종료 후 개인 작업</b><span>2026.09. 이 블록의 수치는 프로젝트 기간 성과가 아닙니다.</span></div>
+      <p>레포 쿼리를 그대로 두고 인덱스 조건만 바꿔 다시 측정했습니다. 확인한 것은 <strong>인덱스를 만드는 것과 인덱스를 타는 것은 다르다</strong>는 점입니다. SPATIAL INDEX를 만들어도 컬럼에 SRID 4326 속성이 없으면 옵티마이저가 쓰지 않습니다(EXPLAIN <code>type=ALL</code>).</p>
+
+      <figure class="scroll">
+        <svg viewBox="0 0 840 176" role="img" aria-labelledby="g2-t g2-d">
+          <title id="g2-t">SRID 속성과 SPATIAL INDEX 사용 여부</title>
+          <desc id="g2-d">SPATIAL INDEX가 있어도 pos 컬럼에 SRID 속성이 없으면 옵티마이저가 인덱스를 쓰지 않아 type=ALL입니다. pos POINT NOT NULL SRID 4326으로 정의하고 SPATIAL INDEX를 걸면 인덱스를 씁니다.</desc>
+          <defs>
+            <marker id="g2-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-arrow"/></marker>
+            <marker id="g2-ab" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-ab"/></marker>
+          </defs>
+          <rect class="dg-rej" x="0" y="10" width="420" height="64"/>
+          <text x="16" y="36" class="dg-mi">pos POINT</text><text x="96" y="36" class="dg-s">SRID 속성 없음</text>
+          <text x="16" y="58" class="dg-s">+ SPATIAL INDEX</text>
+          <line class="dg-bad" x1="420" y1="42" x2="517" y2="42" marker-end="url(#g2-ab)"/>
+          <rect class="dg-risk" x="520" y="10" width="320" height="64"/>
+          <text x="536" y="36" class="dg-tb">옵티마이저가 인덱스를 쓰지 않음</text>
+          <text x="536" y="58" class="dg-m">EXPLAIN type=ALL</text>
+
+          <rect class="dg-good-box" x="0" y="100" width="420" height="64"/>
+          <text x="16" y="126" class="dg-mi">pos POINT NOT NULL SRID 4326</text>
+          <text x="16" y="148" class="dg-s">+ SPATIAL INDEX</text>
+          <line class="dg-line" x1="420" y1="132" x2="517" y2="132" marker-end="url(#g2-a)"/>
+          <rect class="dg-good-box" x="520" y="100" width="320" height="64"/>
+          <text x="536" y="126" class="dg-tg">인덱스로 후보를 찾음</text>
+          <text x="536" y="148" class="dg-s">레포 쿼리(MBRContains + ST_Distance_Sphere) 그대로</text>
+        </svg>
+      </figure>
+
+      <div class="measure" role="group" aria-labelledby="m020">
+        <div class="measure-head"><b id="m020">반경 검색 시간 (find, LIMIT 20 첫 페이지)</b><span>M-020, 재현 실험</span></div>
+        <table>
+          <thead><tr><th scope="col">반경</th><th scope="col">레포 현행 (인덱스 없음)</th><th scope="col">SRID 4326 + SPATIAL INDEX</th></tr></thead>
+          <tbody>
+            <tr class="is-neutral"><th scope="row">1km</th><td class="v">193.1<small>ms</small></td><td class="v">3.4<small>ms</small></td></tr>
+            <tr class="is-neutral"><th scope="row">5km (대표)</th><td class="v">191.5<small>ms</small></td><td class="v">14.7<small>ms</small></td></tr>
+            <tr class="is-neutral"><th scope="row">20km</th><td class="v">214.6<small>ms</small></td><td class="v">62.2<small>ms</small></td></tr>
+          </tbody>
+        </table>
+        <dl>
+          <dt>조건</dt>
+          <dd>Docker MySQL 8.4.11, hotplace 50,915행, buffer pool 128MB, 서버 측 측정, 4지점(서울시청, 강남역, 대전 둔산, 부산 서면) × warm 5회 평균, 단일 클라이언트. 반경이 커질수록 이득이 줄어듭니다.</dd>
+          <dt>범위</dt>
+          <dd>프로젝트 기간의 레포에는 SPATIAL INDEX DDL이 없어 프로젝트 종료 후 재현 실험입니다. 지점별 편차가 커서 최대 배율은 쓰지 않았습니다.</dd>
+        </dl>
+      </div>
+
+      <p>이 인덱스는 이후 레포에 DDL 스크립트(<code>db/hotplace_spatial_index.sql</code>)로 추가했고, 좌표 순서를 바로잡은 마이그레이션(<code>db/Data_Migration_fixed_latlon.sql</code>)도 함께 넣었습니다. 기존 스키마·마이그레이션 파일은 수정하지 않았고, 운영 DB에 실제로 적용했는지는 확인하지 못했습니다.</p>
+    </section>
+
+    <nav class="pager" aria-label="프로젝트 이동">
+      <a href="../synapse/"><span>이전</span>SYNAPSE</a>
+      <a href="../maeumssi/" style="text-align:right"><span>다음</span>마음씨</a>
+    </nav>
+  </main>
+</div>
+
+<footer class="foot">
+  <div class="wrap">© 2026 이재영</div>
+</footer>
+<script src="../../assets/toc.js"></script>
+</body>
+</html>

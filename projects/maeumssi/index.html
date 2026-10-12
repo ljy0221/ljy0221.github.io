@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>마음씨 · 이재영</title>
+<meta name="description" content="마음씨: 우울증 관리 챗봇 및 일상관리 앱. Flutter 프론트엔드, 캡스톤디자인 경진대회 대상, 유지보수 기간의 상태 관리 전환.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;600&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">본문으로 건너뛰기</a>
+
+<header class="bar">
+  <div class="bar-inner">
+    <a class="bar-name" href="../../">이재영</a>
+    <nav aria-label="프로젝트">
+      <a href="../butterfly/">Butterfly</a>
+      <a href="../airadar/">AiRadar</a>
+      <a href="../synapse/">SYNAPSE</a>
+      <a href="../galrae/">갈래말래</a>
+      <a href="./" aria-current="page">마음씨</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap case">
+
+  <aside class="rail" aria-label="프로젝트 정보">
+    <dl>
+      <dt>기간</dt><dd>2024.02 – 06 (캡스톤), 2024.07 – 08 유지보수</dd>
+      <dt>팀</dt><dd>5명 (백엔드 1, 프론트 2, AI 2) 중 프론트</dd>
+      <dt>담당</dt><dd>Flutter 프론트엔드: 일기, 캘린더, 감정 통계, 우울 설문, 채팅 화면, 로그인·회원가입을 포함한 Spring 서버 연동<br>유지보수: 배경음악 재생, 로그인 상태 전역 관리</dd>
+      <dt>스택</dt><dd>캡스톤: Dart 3.3 이상, Syncfusion Charts, FlutterSecureStorage<br>유지보수: Dart 3.4 이상, Provider, fl_chart</dd>
+      <dt>수상</dt><dd>캡스톤디자인 산학협력 프로젝트 경진대회 대상 (2024.06)</dd>
+      <dt>레포</dt><dd><a href="https://github.com/Chaeruin/RestProject/tree/LJY">Chaeruin/RestProject</a> (팀 레포, 본인 작업 브랜치 LJY)</dd>
+    </dl>
+    <nav class="toc" aria-label="이 페이지 목차">
+      <ol>
+        <li><a href="#screens">맡은 화면</a></li>
+        <li><a href="#state">상태 관리 전환</a></li>
+      </ol>
+    </nav>
+  </aside>
+
+  <main id="main" class="case-main">
+    <h1 class="case-title">마음씨</h1>
+    <p class="case-sub">우울증 관리 챗봇 및 일상관리 앱</p>
+
+    <p class="lede">감정 분석 모델과 연동해 일상 기록과 상담을 제공하는 모바일 앱입니다. Flutter·Dart 경험 없이 프론트엔드를 맡아 캡스톤 기간에 일기·감정 통계·우울 설문·채팅 화면과 Spring API 연동을 만들었고, 경진대회에서 대상을 받았습니다.</p>
+    <p>Spring Boot(MyBatis)와 AI 서버 Flask(KoELECTRA)를 클라이언트에서 각각 호출했고, 행동 추천 화면은 다른 프론트 팀원 영역입니다.</p>
+
+    <section aria-labelledby="screens">
+      <h2 id="screens">맡은 화면</h2>
+
+      <figure>
+        <div class="shots shots-2">
+          <div class="shot crop"><img src="../../assets/img/maeum-diary.png" style="aspect-ratio:470/474;object-position:0% 0" loading="lazy" alt="일기 화면: 달력에서 날짜를 고르고, 일기 작성 전 감정을 고르는 목록"></div>
+          <div class="shot crop"><img src="../../assets/img/maeum-diary.png" style="aspect-ratio:469/474;object-position:100% 0" loading="lazy" alt="일기 화면: 작성 전후 감정 변화가 화살표로 표시된 달력과 저장된 일기"></div>
+        </div>
+        <figcaption>일기: 달력에서 날짜를 고르고 작성 전 감정을 기록한 뒤, 작성 후 감정까지 남기면 전후 변화를 보여 줍니다.</figcaption>
+      </figure>
+
+      <figure>
+        <div class="shots shots-2">
+          <div class="shot"><img src="../../assets/img/maeum-stats.png" width="780" height="793" loading="lazy" alt="마음 통계 화면: 월간 감정 원그래프, 감정 Top3, 행동 통계, 시간대별로 가장 많이 느낀 감정"></div>
+          <div class="shot crop"><img src="../../assets/img/maeum-survey.png" style="aspect-ratio:770/787;object-position:50.1% 0" loading="lazy" alt="우울증 건강설문(PHQ-9) 화면과 총점 12점, 중간 정도의 우울이라는 검사 결과"></div>
+        </div>
+        <figcaption>왼쪽은 감정 통계(유지보수 기간에 fl_chart로 교체), 오른쪽은 PHQ-9 우울 설문과 결과입니다. 화면은 2024.08 유지보수 버전이며 팀 README에 실린 캡처입니다.</figcaption>
+      </figure>
+    </section>
+
+    <section aria-labelledby="state">
+      <h2 id="state">유지보수 기간의 상태 관리 전환</h2>
+      <p>이후 같은 주제로 2024년 공개SW개발자대회에 출전했으나 예선에서 탈락했고, 캡스톤 기간에 미비했다고 판단한 부분을 개선하려고 유지보수를 이어가며 기술 선택을 바꿨습니다.</p>
+
+      <div class="step"><h3>문제</h3><div>
+        <p>캡스톤 버전은 <code>memberId</code>를 보안 저장소에서 화면마다 읽거나 생성자로 넘겼습니다(prop drilling). 화면이 깊어질수록 전달 경로가 길어져 코드가 지저분했고 제가 지향하는 개발 방식과도 맞지 않는다고 판단했습니다.</p>
+      </div></div>
+      <div class="step"><h3>해결</h3><div>
+        <p>로그인 정보를 <code>AuthProvider</code>로 올려 <code>SharedPreferences</code>에 영속화하고 홈·채팅·일기·통계·추천·로그인 화면에 적용했습니다. 배경음악은 <code>AudioProvider</code>로 분리해 화면을 옮겨도 이어 재생되게 했습니다. 통계 차트는 Syncfusion Charts가 정해진 차트 유형 위주여서 커스터마이징에 한계가 있다고 판단해 <code>fl_chart</code>로 바꿨습니다.</p>
+      </div></div>
+
+      <figure class="scroll">
+        <svg viewBox="0 0 840 316" role="img" aria-labelledby="m1-t m1-d">
+          <title id="m1-t">로그인 상태 전달 방식 전환</title>
+          <desc id="m1-d">캡스톤 버전은 화면마다 보안 저장소에서 memberId를 읽거나 생성자로 넘겼습니다. 유지보수 버전은 AuthProvider가 로그인 정보를 들고 홈, 채팅, 일기, 통계, 추천, 로그인 화면이 이를 구독합니다. 행동, 일기 작성, 통계 위젯, 설문 화면에는 생성자 전달이 남아 있습니다.</desc>
+          <defs>
+            <marker id="m1-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-arrow"/></marker>
+            <marker id="m1-ab" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-ab"/></marker>
+            <marker id="m1-ag" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-ag"/></marker>
+          </defs>
+          <text x="0" y="20" class="dg-h">캡스톤 버전</text>
+          <rect class="dg-box" x="0" y="34" width="360" height="40"/>
+          <text x="180" y="59" text-anchor="middle" class="dg-t">FlutterSecureStorage</text>
+          <rect class="dg-bad-box" x="0"   y="130" width="100" height="40"/><text x="50"  y="155" text-anchor="middle" class="dg-t">홈</text>
+          <rect class="dg-bad-box" x="130" y="130" width="100" height="40"/><text x="180" y="155" text-anchor="middle" class="dg-t">일기</text>
+          <rect class="dg-bad-box" x="260" y="130" width="100" height="40"/><text x="310" y="155" text-anchor="middle" class="dg-t">일기 작성</text>
+          <line class="dg-bad dg-dash" x1="50"  y1="74" x2="50"  y2="127" marker-end="url(#m1-ab)"/>
+          <line class="dg-bad dg-dash" x1="180" y1="74" x2="180" y2="127" marker-end="url(#m1-ab)"/>
+          <text x="58" y="104" class="dg-s">화면마다 읽기</text>
+          <line class="dg-bad" x1="100" y1="160" x2="127" y2="160" marker-end="url(#m1-ab)"/>
+          <line class="dg-bad" x1="230" y1="160" x2="257" y2="160" marker-end="url(#m1-ab)"/>
+          <text x="180" y="196" text-anchor="middle" class="dg-tb">memberId를 생성자로 계속 전달</text>
+          <text x="0" y="230" class="dg-s">화면이 깊어질수록 전달 경로가 길어짐</text>
+
+          <text x="420" y="20" class="dg-h">유지보수 버전</text>
+          <rect class="dg-good-box" x="420" y="34" width="250" height="56"/>
+          <text x="545" y="58" text-anchor="middle" class="dg-t">AuthProvider</text>
+          <text x="545" y="77" text-anchor="middle" class="dg-s">SharedPreferences에 영속화</text>
+          <rect class="dg-good-box" x="690" y="34" width="150" height="56"/>
+          <text x="765" y="58" text-anchor="middle" class="dg-t">AudioProvider</text>
+          <text x="765" y="77" text-anchor="middle" class="dg-s">화면 이동 중 재생 유지</text>
+          <g>
+            <rect class="dg-box" x="420" y="130" width="72" height="34"/><text x="456" y="152" text-anchor="middle" class="dg-s" style="fill:var(--ink)">홈</text>
+            <rect class="dg-box" x="500" y="130" width="72" height="34"/><text x="536" y="152" text-anchor="middle" class="dg-s" style="fill:var(--ink)">채팅</text>
+            <rect class="dg-box" x="580" y="130" width="72" height="34"/><text x="616" y="152" text-anchor="middle" class="dg-s" style="fill:var(--ink)">일기</text>
+            <rect class="dg-box" x="660" y="130" width="72" height="34"/><text x="696" y="152" text-anchor="middle" class="dg-s" style="fill:var(--ink)">통계</text>
+            <rect class="dg-box" x="740" y="130" width="46" height="34"/><text x="763" y="152" text-anchor="middle" class="dg-s" style="fill:var(--ink)">추천</text>
+            <rect class="dg-box" x="794" y="130" width="46" height="34"/><text x="817" y="152" text-anchor="middle" class="dg-s" style="fill:var(--ink)">로그인</text>
+          </g>
+          <path class="dg-good" d="M545,90 V110 H456 V127 M545,110 H817 V127 M536,110 V127 M616,110 V127 M696,110 V127 M763,110 V127"/>
+          <text x="420" y="196" class="dg-tg">구독해서 로그인 정보를 읽음</text>
+          <rect class="dg-rej" x="420" y="214" width="420" height="58"/>
+          <text x="436" y="238" class="dg-t" style="fill:var(--graphite)">생성자 전달이 남은 화면</text>
+          <text x="436" y="258" class="dg-s">행동, 일기 작성, 통계 위젯, 설문</text>
+          <text x="420" y="300" class="dg-s">전환은 부분 적용에 그쳤습니다.</text>
+        </svg>
+      </figure>
+
+      <div class="lesson">
+        <h3>배운 점</h3>
+        <p>전환은 <strong>부분 적용</strong>에 그쳤습니다. 행동·일기 작성·통계 위젯·설문 화면에는 생성자 전달이 남아 있습니다. 전역으로 올릴 값과 화면에 남길 값의 경계를 먼저 정하지 않으면 두 방식이 섞인 채 남는다는 것이 이 프로젝트에서 남은 점입니다.</p>
+      </div>
+    </section>
+
+    <nav class="pager" aria-label="프로젝트 이동">
+      <a href="../galrae/"><span>이전</span>갈래말래</a>
+      <a href="../../#projects" style="text-align:right"><span>목록</span>전체 프로젝트</a>
+    </nav>
+  </main>
+</div>
+
+<footer class="foot">
+  <div class="wrap">© 2026 이재영</div>
+</footer>
+<script src="../../assets/toc.js"></script>
+</body>
+</html>

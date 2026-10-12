@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Butterfly CRM · 이재영</title>
+<meta name="description" content="Butterfly CRM: 발송 결과 적재와 집계 파이프라인. Kafka 배치 적재 전환, ADR, 관측성, 트랜잭션 경계 복구.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;600&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="../../assets/site.css">
+</head>
+<body>
+<a class="skip" href="#main">본문으로 건너뛰기</a>
+
+<header class="bar">
+  <div class="bar-inner">
+    <a class="bar-name" href="../../">이재영</a>
+    <nav aria-label="프로젝트">
+      <a href="./" aria-current="page">Butterfly</a>
+      <a href="../airadar/">AiRadar</a>
+      <a href="../synapse/">SYNAPSE</a>
+      <a href="../galrae/">갈래말래</a>
+      <a href="../maeumssi/">마음씨</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap case">
+
+  <aside class="rail" aria-label="프로젝트 정보">
+    <dl>
+      <dt>기간</dt><dd>2026.04 – 05 (6주)</dd>
+      <dt>팀</dt><dd>5명 (백엔드 3, 인프라 1, 프론트 1) 중 백엔드</dd>
+      <dt>담당</dt><dd>집계·통계·분석 모듈(reporting), 관측성 메인, GitLab CI</dd>
+      <dt>스택</dt><dd>Java 21, Spring Boot 3.5, JPA, Flyway, MySQL 8, Kafka, Redis, Prometheus / Grafana / Loki, Testcontainers</dd>
+      <dt>레포</dt><dd><a href="https://github.com/ljy0221/butterfly_crm">ljy0221/butterfly_crm</a></dd>
+    </dl>
+    <nav class="toc" aria-label="이 페이지 목차">
+      <ol>
+        <li><a href="#batch">배치 적재 전환</a></li>
+        <li><a href="#adr">ADR과 Flyway</a></li>
+        <li><a href="#ops">관측성·집계·CI</a></li>
+        <li><a href="#tx">트랜잭션 경계 복구</a></li>
+        <li><a class="is-later" href="#later-09">종료 후 재측정</a></li>
+        <li><a class="is-later" href="#later-10">테스트 재작성</a></li>
+      </ol>
+    </nav>
+  </aside>
+
+  <main id="main" class="case-main">
+    <h1 class="case-title">Butterfly CRM</h1>
+    <p class="case-sub">발송 결과 적재와 집계 파이프라인</p>
+
+    <p class="lede">캠페인 메시지를 채널별로 발송하고 그 결과를 집계해 대시보드로 보여 주는 서비스입니다. 저는 발송 워커가 보낸 결과 메시지를 Kafka로 받아 <code>notification_logs</code>에 적재하고 그 위에서 시간별·일별 집계를 만들어 대시보드 API로 내보내는 구간을 맡았습니다.</p>
+    <p>이 구간은 앞쪽과 뒤쪽의 성질이 다릅니다. 앞쪽은 재전달이 있는 <strong>쓰기 처리량</strong> 문제이고, 뒤쪽은 데이터가 쌓일수록 무거워지는 <strong>집계 읽기</strong> 문제입니다.</p>
+
+    <figure class="scroll">
+      <svg viewBox="0 0 720 210" role="img" aria-labelledby="v1-t v1-d">
+        <title id="v1-t">발송 결과 적재 파이프라인</title>
+        <desc id="v1-d">발송 워커에서 Kafka 발송 결과 토픽, reporting 컨슈머, notification_logs, 집계 테이블, 대시보드 API 순으로 흐릅니다. reporting 컨슈머부터 대시보드 API까지 네 구간이 본인 담당입니다.</desc>
+        <defs><marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-arrow"/></marker></defs>
+        <!-- 담당 구간 괄호 -->
+        <path class="dg-bracket" d="M236,30 V20 H714 V30"/>
+        <text x="475" y="13" text-anchor="middle" class="dg-s">본인 담당</text>
+        <!-- 노드 -->
+        <rect class="dg-box" x="2"   y="44" width="104" height="96"/>
+        <text x="54"  y="86"  text-anchor="middle" class="dg-t">발송 워커</text>
+        <text x="54"  y="106" text-anchor="middle" class="dg-s">팀원 담당</text>
+
+        <rect class="dg-box" x="122" y="44" width="104" height="96"/>
+        <text x="174" y="86"  text-anchor="middle" class="dg-t">Kafka</text>
+        <text x="174" y="106" text-anchor="middle" class="dg-s">발송 결과 토픽</text>
+
+        <rect class="dg-own" x="242" y="44" width="110" height="96"/>
+        <text x="297" y="78"  text-anchor="middle" class="dg-t">reporting</text>
+        <text x="297" y="96"  text-anchor="middle" class="dg-t">컨슈머</text>
+        <text x="297" y="116" text-anchor="middle" class="dg-s">배치 리스너</text>
+
+        <rect class="dg-own" x="368" y="44" width="110" height="96"/>
+        <text x="423" y="80"  text-anchor="middle" class="dg-m" style="fill:var(--ink);font-weight:600">notification</text>
+        <text x="423" y="96"  text-anchor="middle" class="dg-m" style="fill:var(--ink);font-weight:600">_logs</text>
+        <text x="423" y="120" text-anchor="middle" class="dg-s">message_key</text><text x="423" y="134" text-anchor="middle" class="dg-s">UNIQUE</text>
+
+        <rect class="dg-own" x="494" y="44" width="104" height="96"/>
+        <text x="546" y="86"  text-anchor="middle" class="dg-t">집계 테이블</text>
+        <text x="546" y="106" text-anchor="middle" class="dg-s">hourly / daily</text>
+
+        <rect class="dg-own" x="614" y="44" width="100" height="96"/>
+        <text x="664" y="86"  text-anchor="middle" class="dg-t">대시보드</text>
+        <text x="664" y="104" text-anchor="middle" class="dg-t">API</text>
+        <!-- 화살표 -->
+        <line class="dg-line" x1="106" y1="92" x2="120" y2="92" marker-end="url(#ah)"/>
+        <line class="dg-line" x1="226" y1="92" x2="240" y2="92" marker-end="url(#ah)"/>
+        <line class="dg-line" x1="352" y1="92" x2="366" y2="92" marker-end="url(#ah)"/>
+        <line class="dg-line" x1="478" y1="92" x2="492" y2="92" marker-end="url(#ah)"/>
+        <line class="dg-line" x1="598" y1="92" x2="612" y2="92" marker-end="url(#ah)"/>
+        <!-- 성질 구분 -->
+        <path class="dg-line" d="M242,160 V168 H478 V160"/>
+        <text x="360" y="188" text-anchor="middle" class="dg-s">쓰기 처리량 (재전달 있음)</text>
+        <path class="dg-line" d="M494,160 V168 H714 V160"/>
+        <text x="604" y="188" text-anchor="middle" class="dg-s">집계 읽기 (쌓일수록 무거움)</text>
+      </svg>
+      <figcaption>굵은 테두리가 제가 맡은 구간입니다. 발송 워커와는 Kafka 페이로드 스키마를 합의했고, GHCR 푸시 이후 배포 자동화는 팀원이 맡았습니다.</figcaption>
+    </figure>
+
+    <!-- 1 -->
+    <section aria-labelledby="batch">
+      <h2 id="batch">Kafka 발송 결과 적재의 배치 전환</h2>
+
+      <div class="step"><h3>문제</h3><div>
+        <p>캠페인 한 건을 발송하면 채널별 결과 메시지가 Kafka로 한꺼번에 들어옵니다. 그런데 이 결과를 받는 컨슈머가 메시지 1건마다 <code>notification_logs</code>에 INSERT하고 커밋했습니다. <code>hibernate.jdbc.batch_size=1000</code>을 설정해 두었는데도 실제로 실행되는 SQL은 단건 INSERT였습니다. 적재가 밀리면 그 위에 얹힌 시간별 집계와 대시보드가 함께 늦어집니다. 거기에 중복 적재를 막으려고 건마다 Redis SETNX 가드를 한 번 더 왕복하고 있었습니다.</p>
+        <p>적재 처리량을 올리되 같은 <code>message_key</code>가 두 번 들어오지 않도록 하는 멱등성은 그대로 유지해야 했습니다. 재전달이 일어나는 구간이라 멱등성을 포기하는 선택지는 없었습니다.</p>
+      </div></div>
+
+      <div class="step"><h3>원인</h3><div>
+        <p>배치 적재로 바꾸는 작업에 착수한 뒤에 원인을 규명했습니다. <code>NotificationLog</code>의 PK 생성 전략이 <code>IDENTITY</code>라 Hibernate가 PK 값을 받으려고 INSERT를 즉시 실행합니다. 그 때문에 배치 설정이 조용히 무효가 됩니다.</p>
+      </div></div>
+
+      <figure class="scroll">
+        <svg viewBox="0 0 840 262" role="img" aria-labelledby="d2-t d2-d">
+          <title id="d2-t">IDENTITY 전략이 JDBC 배치를 끄는 이유</title>
+          <desc id="d2-d">왼쪽은 설정이 기대한 동작으로, 여러 INSERT를 JDBC 배치로 묶어 MySQL에 한 번에 보냅니다. 오른쪽은 IDENTITY 전략에서 실제로 일어난 일로, INSERT마다 즉시 실행하고 생성된 PK를 받아 옵니다.</desc>
+          <defs>
+            <marker id="d2-ai" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-ai"/></marker>
+            <marker id="d2-ab" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-ab"/></marker>
+            <marker id="d2-ag" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-arrow"/></marker>
+          </defs>
+          <!-- 왼쪽: 기대 -->
+          <text x="20" y="20" class="dg-h">설정이 기대한 동작</text>
+          <text x="20" y="40" class="dg-m">batch_size=1000</text>
+          <rect class="dg-box" x="20" y="52" width="370" height="100"/>
+          <text x="34" y="72" class="dg-s">애플리케이션 (Hibernate)</text>
+          <rect class="dg-group" x="34" y="82" width="342" height="44"/>
+          <g>
+            <rect class="dg-chip" x="46"  y="92" width="56" height="24"/><text x="74"  y="108" text-anchor="middle" class="dg-chip-t">INSERT</text>
+            <rect class="dg-chip" x="110" y="92" width="56" height="24"/><text x="138" y="108" text-anchor="middle" class="dg-chip-t">INSERT</text>
+            <rect class="dg-chip" x="174" y="92" width="56" height="24"/><text x="202" y="108" text-anchor="middle" class="dg-chip-t">INSERT</text>
+            <rect class="dg-chip" x="238" y="92" width="56" height="24"/><text x="266" y="108" text-anchor="middle" class="dg-chip-t">INSERT</text>
+            <rect class="dg-chip" x="302" y="92" width="56" height="24"/><text x="330" y="108" text-anchor="middle" class="dg-chip-t">INSERT</text>
+          </g>
+          <text x="205" y="144" text-anchor="middle" class="dg-s">JDBC 배치로 묶음</text>
+          <line class="dg-thick" x1="205" y1="152" x2="205" y2="190" marker-end="url(#d2-ai)"/>
+          <text x="216" y="176" class="dg-s">한 번에 실행</text>
+          <rect class="dg-box" x="20" y="194" width="370" height="36"/>
+          <text x="205" y="217" text-anchor="middle" class="dg-t">MySQL</text>
+          <text x="205" y="254" text-anchor="middle" class="dg-s">여러 INSERT를 모아 한 번에 보냄</text>
+
+          <!-- 오른쪽: 실제 -->
+          <text x="460" y="20" class="dg-h">IDENTITY에서 실제로 일어난 일</text>
+          <text x="460" y="40" class="dg-m">@GeneratedValue(strategy = IDENTITY)</text>
+          <rect class="dg-box" x="460" y="52" width="360" height="100"/>
+          <text x="474" y="72" class="dg-s">애플리케이션 (Hibernate)</text>
+          <g>
+            <rect class="dg-chip" x="480" y="92" width="56" height="24"/><text x="508" y="108" text-anchor="middle" class="dg-chip-t">INSERT</text>
+            <rect class="dg-chip" x="548" y="92" width="56" height="24"/><text x="576" y="108" text-anchor="middle" class="dg-chip-t">INSERT</text>
+            <rect class="dg-chip" x="616" y="92" width="56" height="24"/><text x="644" y="108" text-anchor="middle" class="dg-chip-t">INSERT</text>
+            <rect class="dg-chip" x="684" y="92" width="56" height="24"/><text x="712" y="108" text-anchor="middle" class="dg-chip-t">INSERT</text>
+            <rect class="dg-chip" x="752" y="92" width="56" height="24"/><text x="780" y="108" text-anchor="middle" class="dg-chip-t">INSERT</text>
+          </g>
+          <g>
+            <line class="dg-bad" x1="502" y1="118" x2="502" y2="191" marker-end="url(#d2-ab)"/><line class="dg-line dg-dash" x1="514" y1="194" x2="514" y2="121" marker-end="url(#d2-ag)"/>
+            <line class="dg-bad" x1="570" y1="118" x2="570" y2="191" marker-end="url(#d2-ab)"/><line class="dg-line dg-dash" x1="582" y1="194" x2="582" y2="121" marker-end="url(#d2-ag)"/>
+            <line class="dg-bad" x1="638" y1="118" x2="638" y2="191" marker-end="url(#d2-ab)"/><line class="dg-line dg-dash" x1="650" y1="194" x2="650" y2="121" marker-end="url(#d2-ag)"/>
+            <line class="dg-bad" x1="706" y1="118" x2="706" y2="191" marker-end="url(#d2-ab)"/><line class="dg-line dg-dash" x1="718" y1="194" x2="718" y2="121" marker-end="url(#d2-ag)"/>
+            <line class="dg-bad" x1="774" y1="118" x2="774" y2="191" marker-end="url(#d2-ab)"/><line class="dg-line dg-dash" x1="786" y1="194" x2="786" y2="121" marker-end="url(#d2-ag)"/>
+          </g>
+          <rect class="dg-box" x="460" y="194" width="360" height="36"/>
+          <text x="640" y="217" text-anchor="middle" class="dg-t">MySQL</text>
+          <text x="640" y="254" text-anchor="middle" class="dg-s"><tspan class="dg-tb">INSERT 즉시 실행</tspan>, 점선은 생성된 PK를 받아 오는 응답</text>
+        </svg>
+        <figcaption>Hibernate는 PK 값을 받아야 하므로 IDENTITY 전략에서는 INSERT를 미뤄 묶지 못합니다. 설정 파일만 보면 배치가 켜진 것으로 읽힙니다.</figcaption>
+      </figure>
+
+      <div class="step"><h3>해결</h3><div>
+        <p>PK 채번을 거치지 않아야 배치가 실제로 묶이므로 JPA를 우회해 <code>NamedParameterJdbcTemplate.batchUpdate</code> + <code>INSERT IGNORE</code>로 적재했습니다. 단건 리스너는 배치 리스너(<code>AckMode</code> RECORD → BATCH, <code>max.poll.records=500</code>)로 바꿨습니다.</p>
+        <p>Redis SETNX 가드 대신 <code>message_key</code> UNIQUE 제약으로 멱등성을 옮겼습니다. 발송 워커 담당 팀원과 Kafka 페이로드 스키마를 합의하면서 <code>message_key</code>를 멱등성 키로 쓰기로 정한 것이 그 근거였습니다.</p>
+      </div></div>
+
+      <div class="step"><h3>대가</h3><div>
+        <p><code>INSERT IGNORE</code>는 중복 외의 오류(길이 초과 등)도 경고로 삼킵니다. 배치 도중 예외가 나면 배치 전체가 롤백·재전달됩니다.</p>
+      </div></div>
+
+      <figure class="scroll">
+        <svg viewBox="0 0 840 240" role="img" aria-labelledby="d3-t d3-d">
+          <title id="d3-t">적재 경로 개선 전후</title>
+          <desc id="d3-d">개선 전에는 Kafka 레코드 1건마다 Redis SETNX, INSERT 1건, 커밋 1회를 반복했습니다. 개선 후에는 poll 단위로 최대 500건을 받아 batchUpdate와 INSERT IGNORE로 적재하고 커밋을 한 번 합니다.</desc>
+          <defs>
+            <marker id="d3-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-arrow"/></marker>
+            <marker id="d3-ab" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-ab"/></marker>
+          </defs>
+          <!-- 개선 전 -->
+          <text x="0" y="56" class="dg-tb">개선 전</text>
+          <text x="0" y="74" class="dg-s">메시지마다</text>
+          <rect class="dg-bad-box" x="100" y="36" width="150" height="48"/>
+          <text x="175" y="65" text-anchor="middle" class="dg-t">Kafka 레코드 1건</text>
+          <rect class="dg-bad-box" x="280" y="36" width="150" height="48"/>
+          <text x="355" y="58" text-anchor="middle" class="dg-t">Redis SETNX</text>
+          <text x="355" y="75" text-anchor="middle" class="dg-s">중복 확인 왕복</text>
+          <rect class="dg-bad-box" x="460" y="36" width="150" height="48"/>
+          <text x="535" y="58" text-anchor="middle" class="dg-t">INSERT 1건</text>
+          <text x="535" y="75" text-anchor="middle" class="dg-s">JPA save</text>
+          <rect class="dg-bad-box" x="640" y="36" width="150" height="48"/>
+          <text x="715" y="65" text-anchor="middle" class="dg-t">커밋 1회</text>
+          <line class="dg-line" x1="250" y1="60" x2="277" y2="60" marker-end="url(#d3-a)"/>
+          <line class="dg-line" x1="430" y1="60" x2="457" y2="60" marker-end="url(#d3-a)"/>
+          <line class="dg-line" x1="610" y1="60" x2="637" y2="60" marker-end="url(#d3-a)"/>
+          <path class="dg-bad dg-dash" d="M715,84 V104 H175 V88" marker-end="url(#d3-ab)"/>
+          <text x="445" y="122" text-anchor="middle" class="dg-tb">메시지 수만큼 반복</text>
+
+          <!-- 개선 후 -->
+          <text x="0" y="176" class="dg-tg">개선 후</text>
+          <text x="0" y="194" class="dg-s">poll 단위</text>
+          <rect class="dg-good-box" x="100" y="156" width="150" height="48"/>
+          <text x="175" y="178" text-anchor="middle" class="dg-t">poll ≤ 500건</text>
+          <text x="175" y="195" text-anchor="middle" class="dg-s">배치 리스너</text>
+          <rect class="dg-good-box" x="280" y="156" width="330" height="48"/>
+          <text x="445" y="178" text-anchor="middle" class="dg-t">batchUpdate + INSERT IGNORE</text>
+          <text x="445" y="195" text-anchor="middle" class="dg-s">JPA 우회, 중복은 message_key UNIQUE가 걸러냄</text>
+          <rect class="dg-good-box" x="640" y="156" width="150" height="48"/>
+          <text x="715" y="178" text-anchor="middle" class="dg-t">커밋 1회</text>
+          <text x="715" y="195" text-anchor="middle" class="dg-s">poll 배치당</text>
+          <line class="dg-line" x1="250" y1="180" x2="277" y2="180" marker-end="url(#d3-a)"/>
+          <line class="dg-line" x1="610" y1="180" x2="637" y2="180" marker-end="url(#d3-a)"/>
+          <text x="100" y="232" class="dg-s">Redis 가드는 없앴습니다. 멱등성은 DB의 UNIQUE 제약이 맡습니다.</text>
+        </svg>
+      </figure>
+
+      <div class="measure" role="group" aria-labelledby="m001">
+        <div class="measure-head"><b id="m001">적재 처리량 (평균, 3회)</b><span>M-001, 2026.09 재측정</span></div>
+        <table>
+          <thead><tr><th scope="col">구분</th><th scope="col">평균</th><th scope="col" class="r">3회 범위</th></tr></thead>
+          <tbody>
+            <tr class="is-before"><th scope="row">개선 전: 단건 INSERT</th><td class="v">91.8<small>건/초</small></td><td class="r">61.6 – 147.2</td></tr>
+            <tr class="is-after"><th scope="row">개선 후: 배치 적재</th><td class="v">1,485.3<small>건/초</small></td><td class="r">1,413.9 – 1,527.1</td></tr>
+          </tbody>
+        </table>
+        <dl>
+          <dt>조건</dt>
+          <dd>유니크 messageKey 10,000건, 로컬 EmbeddedKafka(파티션 1·컨슈머 1) + Testcontainers MySQL 8.0, 3회. 개선 전 147.2는 원인 미확인 이상치입니다. 로컬 상대 비교이며 배포 환경 절대값이 아닙니다. 개선 전 값에는 이번 개선으로 제거한 Redis 가드 왕복이 포함됩니다.</dd>
+          <dt>근거</dt>
+          <dd>프로젝트 당시 적용한 개선을 대상으로, 개선 전후 두 커밋을 각각 체크아웃해 2026년 9월에 다시 측정했습니다. 배치 적재 도입 커밋 <code>8b213378</code>.</dd>
+        </dl>
+      </div>
+
+      <div class="lesson">
+        <h3>배운 점</h3>
+        <p>설정을 넣는 것과 그 설정이 실제로 적용되는 것은 다릅니다. ORM의 기본 전략(IDENTITY)이 성능 옵션(<code>batch_size</code>)을 조용히 무효화할 수 있습니다. 무효화됐다는 신호는 로그에도 예외에도 남지 않습니다. 설정 파일만 보면 배치가 켜져 있는 것으로 읽히기 때문에 실행되는 SQL을 확인하기 전까지는 적용됐다고 볼 근거가 없습니다.</p>
+        <p>이 개선은 처리량을 올린 대신 오류 처리 경로를 한 단계 성기게 만들었습니다. 단건 INSERT일 때는 어떤 메시지가 왜 실패했는지 예외로 드러났지만 <code>INSERT IGNORE</code> 배치에서는 중복이 아닌 실패도 경고로 흘러가고 배치 전체가 재전달됩니다. 그래서 이 구조는 <strong>처리량과 실패 관측성을 맞바꾸는 관계</strong>입니다. 그 균형을 지키려면 배치 리스너의 롤백·재전달 동작을 테스트로 고정해 두어야 합니다.</p>
+      </div>
+    </section>
+
+    <!-- 2 -->
+    <section aria-labelledby="adr">
+      <h2 id="adr">ADR 작성과 Flyway 하이브리드 도입</h2>
+      <p>팀 ADR 19건 중 12건을 최초 작성했습니다. <code>backend/docs/adr/</code> 파일 최초 추가 커밋의 작성자 기준이며, ADR-0017은 공동 decision-maker라 단독 작성으로 세지 않았습니다.</p>
+      <p>대표 1건은 <strong>ADR-0013(Flyway 도입과 번호 컨벤션)</strong>입니다. 전 모듈이 <code>ddl-auto=update</code>라 DROP·RENAME이 누락되고 환경 간 스키마가 어긋나는 상태였습니다. reporting은 <code>audit_logs</code>의 append-only 트리거와 권한 분리가 필요해 JPA로 표현할 수 없었습니다. 번호 체계는 역할별 블록(FK 순서가 어긋남)과 모듈별 history 분리를 두고 비교한 끝에 개발 순서 V1, V2 방식을 골랐습니다. 전면 전환 대신 <strong>reporting만 Flyway를 쓰는 하이브리드</strong>로 정했습니다. ADR에 적은 이유는 "다른 모듈은 진행 중인 작업이 많아 일괄 전환은 위험"이라는 것이었습니다.</p>
+      <p>집계 테이블 설계(<strong>ADR-0007</strong>)도 같은 방식으로 남겼습니다. 기존 3종으로는 회차 분리·템플릿별 성과·실패 원인·전사 대시보드 요구를 받을 수 없었습니다. 회차를 집계 테이블의 PK에 넣는 안은 카디널리티가 폭증하고, 속성을 한 테이블에 통합하는 안은 인덱스 설계가 불가능했습니다. 집계 5종으로 나누되 회차는 PK가 아니라 실행 식별자와 시간별 윈도우 조회로 받는 쪽을 골랐습니다. 대가는 테이블 5종의 운영 복잡도입니다.</p>
+
+      <figure class="scroll">
+        <svg viewBox="0 0 840 308" role="img" aria-labelledby="d4-t d4-d">
+          <title id="d4-t">ADR-0013 결정 지도</title>
+          <desc id="d4-d">문제는 ddl-auto=update로 인한 스키마 어긋남과 JPA로 표현할 수 없는 트리거·권한 분리였습니다. 번호 체계는 역할별 블록과 모듈별 history 분리를 기각하고 개발 순서 V1, V2를 채택했습니다. 적용 범위는 전 모듈 일괄 전환을 기각하고 reporting만 Flyway를 쓰는 하이브리드를 채택했습니다. 남은 위험은 스키마 변경 경로가 모듈마다 달라지는 것입니다.</desc>
+          <rect class="dg-box" x="0" y="0" width="840" height="60"/>
+          <text x="18" y="35" class="dg-h">문제</text>
+          <text x="70" y="26" class="dg-s">전 모듈이 ddl-auto=update라 DROP·RENAME이 누락되고 환경 간 스키마가 어긋남</text>
+          <text x="70" y="45" class="dg-s">reporting은 audit_logs의 append-only 트리거와 권한 분리가 필요해 JPA로 표현할 수 없음</text>
+          <line class="dg-line" x1="205" y1="60" x2="205" y2="78"/>
+          <line class="dg-line" x1="635" y1="60" x2="635" y2="78"/>
+
+          <text x="0" y="98" class="dg-h">번호 체계</text>
+          <rect class="dg-rej" x="0" y="108" width="410" height="50"/>
+          <text x="16" y="130" class="dg-t" style="fill:var(--graphite)">역할별 번호 블록</text>
+          <text x="16" y="148" class="dg-s">기각: FK 순서가 어긋남</text>
+          <rect class="dg-rej" x="0" y="168" width="410" height="50"/>
+          <text x="16" y="190" class="dg-t" style="fill:var(--graphite)">모듈별 history 분리</text>
+          <text x="16" y="208" class="dg-s">기각</text>
+          <rect class="dg-good-box" x="0" y="228" width="410" height="50"/>
+          <text x="16" y="250" class="dg-t">개발 순서대로 V1, V2</text>
+          <text x="16" y="268" class="dg-tg">채택</text>
+
+          <text x="430" y="98" class="dg-h">적용 범위</text>
+          <rect class="dg-rej" x="430" y="108" width="410" height="50"/>
+          <text x="446" y="130" class="dg-t" style="fill:var(--graphite)">전 모듈 일괄 전환</text>
+          <text x="446" y="148" class="dg-s">기각: 다른 모듈은 진행 중인 작업이 많아 위험</text>
+          <rect class="dg-good-box" x="430" y="168" width="410" height="50"/>
+          <text x="446" y="190" class="dg-t">reporting만 Flyway (하이브리드)</text>
+          <text x="446" y="208" class="dg-tg">채택</text>
+          <line class="dg-line" x1="635" y1="218" x2="635" y2="228"/>
+          <rect class="dg-risk" x="430" y="228" width="410" height="68"/>
+          <text x="446" y="250" class="dg-tb">남은 위험 (ADR에 함께 기록)</text>
+          <text x="446" y="268" class="dg-s">스키마를 바꾸는 경로가 모듈마다 달라짐</text>
+          <text x="446" y="285" class="dg-s">실제로 엔티티, Flyway, 벌크 INSERT SQL이 어긋남</text>
+        </svg>
+      </figure>
+      <div class="lesson">
+        <h3>배운 점</h3>
+        <p>기각한 선택지의 사유까지 남기면 같은 논의를 반복하지 않는다는 것을 ADR 작업에서 배웠습니다. 다만 하이브리드로 두면 스키마를 바꾸는 경로가 모듈마다 달라집니다. 실제로 엔티티·Flyway 마이그레이션·벌크 INSERT SQL 세 곳이 어긋난 지점이 있었습니다(<a href="#later-09">종료 후 재측정</a>에서 발견하고 수정). 그래서 ADR에는 결정이 남기는 위험과 그 위험을 확인할 수단을 함께 적습니다.</p>
+      </div>
+    </section>
+
+    <!-- 3 -->
+    <section aria-labelledby="ops">
+      <h2 id="ops">관측성 · 집계 워커 · 통계 화면 · CI 게이트 · 집계 쿼리</h2>
+      <ul>
+        <li><strong>관측성 인프라 구축</strong>: LGTM 관측 서버를 docker-compose로 구성해 메인으로 맡았습니다. Grafana 대시보드 3종(Kafka 컨슈머 랙·배치 처리량 패널을 포함한 Worker 모니터링 등)과 Loki 로그 패널을 연결하고 Prometheus scrape를 설정했으며, 로그는 MDC 기반 JSON 구조화 로그로 남겨 장애 발생 시 추적 근거로 삼았습니다.</li>
+      </ul>
+
+      <figure class="scroll">
+        <svg viewBox="0 0 840 222" role="img" aria-labelledby="d6-t d6-d">
+          <title id="d6-t">관측성 구성</title>
+          <desc id="d6-d">Spring 애플리케이션의 메트릭은 Prometheus가 수집하고, MDC 기반 JSON 로그는 Loki에 저장됩니다. Grafana가 둘을 읽어 대시보드 3종과 Loki 로그 패널을 보여 줍니다. 관측 서버는 docker-compose로 본인이 구성했습니다.</desc>
+          <defs><marker id="d6-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-arrow"/></marker></defs>
+          <rect class="dg-box" x="0" y="40" width="180" height="146"/>
+          <text x="16" y="64" class="dg-t">Spring 애플리케이션</text>
+          <rect class="dg-chip" x="16" y="78"  width="148" height="26"/><text x="90" y="96"  text-anchor="middle" class="dg-mi">api</text>
+          <rect class="dg-chip" x="16" y="112" width="148" height="26"/><text x="90" y="130" text-anchor="middle" class="dg-mi">worker</text>
+          <rect class="dg-chip" x="16" y="146" width="148" height="26"/><text x="90" y="164" text-anchor="middle" class="dg-mi">reporting</text>
+
+          <rect class="dg-own" x="300" y="8" width="540" height="206"/>
+          <text x="318" y="32" class="dg-s">관측 서버 (docker-compose), 본인 구성</text>
+          <rect class="dg-box" x="330" y="50" width="180" height="58"/>
+          <text x="420" y="75" text-anchor="middle" class="dg-t">Prometheus</text>
+          <text x="420" y="94" text-anchor="middle" class="dg-s">scrape 설정</text>
+          <rect class="dg-box" x="330" y="134" width="180" height="58"/>
+          <text x="420" y="159" text-anchor="middle" class="dg-t">Loki</text>
+          <text x="420" y="178" text-anchor="middle" class="dg-s">로그 저장</text>
+          <rect class="dg-box" x="616" y="64" width="200" height="114"/>
+          <text x="716" y="100" text-anchor="middle" class="dg-t">Grafana</text>
+          <text x="716" y="124" text-anchor="middle" class="dg-s">대시보드 3종</text>
+          <text x="716" y="142" text-anchor="middle" class="dg-s">(컨슈머 랙, 배치 처리량 등)</text>
+          <text x="716" y="160" text-anchor="middle" class="dg-s">Loki 로그 패널</text>
+
+          <line class="dg-line" x1="180" y1="79" x2="327" y2="79" marker-end="url(#d6-a)"/>
+          <text x="240" y="71" text-anchor="middle" class="dg-s">메트릭</text>
+          <line class="dg-line" x1="180" y1="163" x2="327" y2="163" marker-end="url(#d6-a)"/>
+          <text x="240" y="155" text-anchor="middle" class="dg-s">JSON 로그</text>
+          <line class="dg-line" x1="510" y1="79" x2="613" y2="100" marker-end="url(#d6-a)"/>
+          <line class="dg-line" x1="510" y1="163" x2="613" y2="142" marker-end="url(#d6-a)"/>
+        </svg>
+      </figure>
+
+      <ul>
+        <li><strong>집계 워커 안정화</strong>: hourly/daily 집계 워커가 <code>TransactionRequiredException</code>으로 간헐 실패하던 원인이 <code>this.aggregate()</code> 자기 호출이 CGLIB 프록시를 우회해 <code>@Transactional</code>이 걸리지 않는 것이었습니다. <code>@Lazy</code> self-bean 주입으로 프록시를 경유하게 하고, 날짜별 독립 트랜잭션으로 나눴습니다. 스케줄러 시간 기준은 KST로 고정했고, 전날 1일 집계는 D-7~D-1 재집계로 바꿔 지연 이벤트와 DLQ 재처리를 흡수하게 했습니다.</li>
+      </ul>
+
+      <figure class="scroll">
+        <svg viewBox="0 0 840 290" role="img" aria-labelledby="d5-t d5-d">
+          <title id="d5-t">프록시 자기 호출 문제와 해결</title>
+          <desc id="d5-d">왼쪽: 스케줄러가 프록시를 거쳐 run()을 호출하지만, run() 안의 this.aggregate()는 프록시를 거치지 않아 트랜잭션이 걸리지 않고 TransactionRequiredException이 납니다. 오른쪽: @Lazy로 주입한 self.aggregate()를 호출하면 프록시를 거쳐 트랜잭션이 적용되고, 날짜별 독립 트랜잭션으로 나뉩니다.</desc>
+          <defs>
+            <marker id="d5-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-arrow"/></marker>
+            <marker id="d5-ab" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-ab"/></marker>
+            <marker id="d5-ag" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-ag"/></marker>
+          </defs>
+          <g>
+            <text x="0" y="18" class="dg-h">문제: 자기 호출</text>
+            <rect class="dg-box" x="0" y="100" width="86" height="44"/>
+            <text x="43" y="127" text-anchor="middle" class="dg-t">스케줄러</text>
+            <rect class="dg-group" x="110" y="36" width="290" height="196"/>
+            <text x="124" y="56" class="dg-s">CGLIB 프록시 (@Transactional 적용 지점)</text>
+            <rect class="dg-box" x="150" y="70" width="234" height="148"/>
+            <text x="164" y="90" class="dg-s">집계 워커 (실제 객체)</text>
+            <rect class="dg-chip" x="180" y="104" width="174" height="30"/><text x="267" y="124" text-anchor="middle" class="dg-mi">run()</text>
+            <rect class="dg-chip" x="180" y="172" width="174" height="30"/><text x="267" y="192" text-anchor="middle" class="dg-mi">aggregate()</text>
+            <line class="dg-line" x1="86" y1="120" x2="177" y2="120" marker-end="url(#d5-a)"/>
+            <line class="dg-bad" x1="267" y1="134" x2="267" y2="168" marker-end="url(#d5-ab)"/>
+            <text x="259" y="156" text-anchor="end" class="dg-tb" style="font:500 11px var(--mono)">this.aggregate()</text>
+            <text x="110" y="256" class="dg-tb">프록시를 거치지 않아 트랜잭션 없음</text>
+            <text x="110" y="276" class="dg-s">TransactionRequiredException으로 간헐 실패</text>
+          </g>
+          <g transform="translate(440 0)">
+            <text x="0" y="18" class="dg-h">해결: self-bean으로 프록시 경유</text>
+            <rect class="dg-box" x="0" y="100" width="86" height="44"/>
+            <text x="43" y="127" text-anchor="middle" class="dg-t">스케줄러</text>
+            <rect class="dg-group" x="110" y="36" width="290" height="196"/>
+            <text x="124" y="56" class="dg-s">CGLIB 프록시 (@Transactional 적용 지점)</text>
+            <rect class="dg-box" x="150" y="70" width="234" height="148"/>
+            <text x="164" y="90" class="dg-s">집계 워커 (실제 객체)</text>
+            <rect class="dg-chip" x="180" y="104" width="174" height="30"/><text x="267" y="124" text-anchor="middle" class="dg-mi">run()</text>
+            <rect class="dg-chip" x="180" y="172" width="174" height="30"/><text x="267" y="192" text-anchor="middle" class="dg-mi">aggregate()</text>
+            <line class="dg-line" x1="86" y1="120" x2="177" y2="120" marker-end="url(#d5-a)"/>
+            <path class="dg-good" d="M180,128 H128 V187 H176" marker-end="url(#d5-ag)"/>
+            <text x="110" y="256" class="dg-tg">@Lazy로 주입한 self.aggregate()가 프록시를 거침</text>
+            <text x="110" y="276" class="dg-s">날짜별 독립 트랜잭션으로 분리, 스케줄러는 KST 고정</text>
+          </g>
+        </svg>
+      </figure>
+
+      <ul>
+        <li><strong>캠페인 통계 0 표시 차단</strong>: KPI가 항상 0으로 보이던 원인이 두 겹이었습니다. <code>@ConditionalOnProperty</code> 키가 yml에 없어 Stub 구현이 조용히 주입됐고, 실구현도 새벽 1시에 롤업되는 daily 테이블만 읽어 당일 발송분이 0이었습니다. 설정 키를 채우고 daily 우선 + <code>notification_logs</code> raw 카운트 폴백으로 바꿨습니다.</li>
+        <li><strong>CI 게이트 복구</strong>: <code>allow_failure</code>가 붙어 게이트 구실을 못 하던 job을 복원했고, 실제 회귀 2건(Flyway V7/V8 충돌, 애플리케이션 컨텍스트 로드 실패)을 막았습니다. Testcontainers reuse로 integration-test 실행 시간도 14분 02초에서 9분 56초로 줄였습니다. 1회 표본이고 캐시 상태에 따른 편차가 커서 reuse 자체의 효과는 약 -25%로 추정합니다.</li>
+        <li><strong>Code Freeze D-3 감사</strong>: 분석 도메인 9개 마일스톤을 머지한 뒤 5축 감사를 돌려 BLOCKER 0, HIGH 1건(스케줄러 cron <code>zone</code> 미명시)을 1파일 <code>+5/-2</code> 수정으로 잠갔습니다.</li>
+        <li><strong>집계 쿼리</strong>: 시간별 집계 쿼리가 풀스캔이던 구간에 복합 인덱스 <code>(created_at, campaign_id, channel)</code>를 넣은 뒤 집계 지연이 3,743ms에서 2.8ms가 됐습니다. 범위 조건을 선두에, GROUP BY 컬럼을 뒤에 둔 구성은 제 선택입니다. 다만 같은 구간에 사전 집계 테이블도 있어 개선분이 어느 쪽 효과인지는 분리하지 못했고, 측정 원본도 보관하지 않았습니다. 그래서 <a href="#later-09">종료 후 재현 실험</a> 값을 함께 적었습니다.</li>
+      </ul>
+    </section>
+
+    <!-- 4 -->
+    <section aria-labelledby="tx">
+      <h2 id="tx">통합 테스트 삭제와 트랜잭션 경계 복구</h2>
+      <div class="step"><h3>문제</h3><div>
+        <p>위 개선 뒤 배치 리스너를 수정하는 과정에서 Kafka 통합 테스트 2파일(473줄)과 프로덕션의 <code>@Transactional</code> 2줄이 같은 커밋(<code>4ff4006c</code>)에서 함께 빠졌습니다. 커밋에 적힌 사유는 "불안정한 Kafka 통합 테스트를 제거한다"였습니다.</p>
+      </div></div>
+      <div class="step"><h3>원인</h3><div>
+        <p><code>@Transactional</code> 제거 근거는 "배치 <code>KafkaListener</code>에 <code>@Transactional</code>을 붙이면 AOP 프록시가 <code>List&lt;&gt;</code> 파라미터 매칭을 방해할 수 있다"는 검증하지 않은 가정이었습니다. 프로젝트 종료 직전에 들어간 커밋이라 회귀는 CI를 통과한 채 남았습니다. 기존 CI가 보는 축이 "빌드와 기능 테스트가 통과하는가"였기 때문입니다.</p>
+      </div></div>
+      <figure class="scroll">
+        <svg viewBox="0 0 840 250" role="img" aria-labelledby="d7-t d7-d">
+          <title id="d7-t">CI 게이트가 보는 축과 보지 않는 축</title>
+          <desc id="d7-d">커밋 4ff4006c는 통합 테스트 2파일(473줄)과 @Transactional 2줄을 함께 제거했습니다. CI 게이트는 빌드, 기능 테스트, Flyway 마이그레이션 충돌, 애플리케이션 컨텍스트 로드를 보지만 성능과 배치 롤백 동작은 보지 않아 회귀가 통과했습니다.</desc>
+          <defs>
+            <marker id="d7-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-arrow"/></marker>
+            <marker id="d7-ab" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="dg-ab"/></marker>
+          </defs>
+          <rect class="dg-box" x="0" y="64" width="232" height="110"/>
+          <text x="16" y="90" class="dg-mi" style="font-weight:600">커밋 4ff4006c</text>
+          <text x="16" y="120" class="dg-s">Kafka 통합 테스트 2파일 삭제</text>
+          <text x="16" y="138" class="dg-s">(473줄)</text>
+          <text x="16" y="160" class="dg-s">프로덕션 @Transactional 2줄 제거</text>
+          <line class="dg-line" x1="232" y1="119" x2="297" y2="119" marker-end="url(#d7-a)"/>
+
+          <rect class="dg-own" x="300" y="10" width="290" height="226"/>
+          <text x="318" y="36" class="dg-h">CI 게이트가 보는 축</text>
+          <text x="318" y="64" class="dg-t">빌드</text>
+          <text x="318" y="88" class="dg-t">기능 테스트</text>
+          <text x="318" y="112" class="dg-t">Flyway 마이그레이션 충돌</text><text x="574" y="112" text-anchor="end" class="dg-tg">실제로 막음</text>
+          <text x="318" y="136" class="dg-t">컨텍스트 로드 실패</text><text x="574" y="136" text-anchor="end" class="dg-tg">실제로 막음</text>
+          <line class="dg-line" x1="318" y1="156" x2="574" y2="156"/>
+          <text x="318" y="182" class="dg-h" style="fill:var(--graphite)">보지 않는 축</text>
+          <text x="318" y="208" class="dg-tb">성능, 배치 롤백 동작</text>
+
+          <line class="dg-bad" x1="590" y1="119" x2="645" y2="119" marker-end="url(#d7-ab)"/>
+          <rect class="dg-risk" x="648" y="64" width="192" height="110"/>
+          <text x="744" y="102" text-anchor="middle" class="dg-tb">회귀가 CI 통과</text>
+          <text x="744" y="126" text-anchor="middle" class="dg-s">트랜잭션 경계가 빠진 채</text>
+          <text x="744" y="144" text-anchor="middle" class="dg-s">프로젝트 종료</text>
+        </svg>
+      </figure>
+
+      <div class="step"><h3>결과</h3><div>
+        <p>회귀를 실제로 발견하고 복원한 시점과 그 크기는 <a href="#later-09">종료 후 재측정</a>에 적었습니다.</p>
+      </div></div>
+      <div class="lesson">
+        <h3>배운 점</h3>
+        <p>지금은 테스트 삭제와 프로덕션 변경을 한 커밋에 넣지 않고 커밋에 들어가는 변경 범위를 diff로 확인한 뒤에 올립니다. 미검증 가정으로 코드를 지우지 않습니다. 게이트를 만들 때 무엇을 막는 게이트인지를 먼저 정의합니다. CI 게이트 복구로 막을 수 있었던 것은 마이그레이션 충돌과 컨텍스트 로드 실패였고, 성능과 롤백 동작은 그 게이트가 보는 축이 아니었습니다.</p>
+      </div>
+    </section>
+
+    <!-- 종료 후 -->
+    <section class="later" aria-labelledby="later-09">
+      <div class="later-tag"><b id="later-09">프로젝트 종료 후 개인 작업</b><span>2026.09. 이 블록의 수치는 프로젝트 기간 성과가 아닙니다.</span></div>
+
+      <p><strong>트랜잭션 회귀와 <code>updated_at</code> 결함을 이 시기에 발견했습니다.</strong> <code>@Transactional</code>이 빠진 상태에서는 처리량이 크게 떨어졌고, 회귀를 발견한 뒤 <code>@Transactional</code>을 복원했습니다(<code>82efef2c</code>). <code>updated_at</code> 결함은 빈 MySQL에 Flyway V1~V21을 적용한 뒤 같은 INSERT로 <code>ERROR 1054</code>를 재현해 확인하고 컬럼 정의를 맞춰 고쳤습니다(<code>e9ad2fff</code>).</p>
+
+      <p><strong>집계 쿼리는 레포의 스키마와 쿼리를 그대로 두고, 행 폭·버퍼 풀은 제가 가정해 구성한 조건에서 다시 측정했습니다.</strong></p>
+
+      <div class="measure" role="group" aria-labelledby="m004">
+        <div class="measure-head"><b id="m004">1시간 윈도우 집계 쿼리 (warm 5회)</b><span>M-004, 재현 실험</span></div>
+        <table>
+          <thead><tr><th scope="col">구분</th><th scope="col">지연</th></tr></thead>
+          <tbody>
+            <tr class="is-before"><th scope="row">인덱스 없음</th><td class="v">2,663<small>ms</small></td></tr>
+            <tr class="is-after"><th scope="row">복합 인덱스 적용</th><td class="v">3.26<small>ms</small></td></tr>
+          </tbody>
+        </table>
+        <dl>
+          <dt>조건</dt>
+          <dd>합성 103만 행, 행 폭 평균 1.1KB, MySQL 8.0 buffer pool 128MB, <code>O_DIRECT</code>. 행 폭과 버퍼 풀은 제가 정한 가정값이고, 원본 환경이 이랬다는 증거는 없습니다. 시간 범위를 7일 이상으로 넓히면 옵티마이저가 인덱스를 무시해 이득이 사라집니다.</dd>
+          <dt>범위</dt>
+          <dd>이 실험에서 쓴 인덱스는 레포에 반영하지 않았습니다. 프로젝트 기간의 개선과는 별개의 실험용 인덱스입니다.</dd>
+        </dl>
+      </div>
+
+      <figure>
+        <div class="explain">
+<pre><span class="lbl">인덱스 없음</span>type=<span class="bad">ALL</span>  key=NULL  rows=943334
+Extra=Using where; <span class="same">Using temporary</span></pre>
+<pre><span class="lbl">인덱스 적용</span>type=<span class="good">range</span>  key=b3c_ca_camp_chan (created_at, campaign_id, channel)  rows=1431
+Extra=Using index condition; <span class="same">Using temporary</span></pre>
+        </div>
+        <figcaption>같은 쿼리에 인덱스 DDL만 추가했습니다. 밑줄 친 <code>Using temporary</code>는 인덱스로 사라지지 않고 양쪽에 남습니다.</figcaption>
+      </figure>
+
+      <p>레포에 실제로 있던 보조 인덱스 7개는 이 쿼리의 조건절과 선두 컬럼이 맞지 않아 옵티마이저가 하나도 쓰지 않았습니다(EXPLAIN <code>type=ALL</code>). 인덱스는 "있다/없다"가 아니라 쿼리의 조건절과 선두 컬럼이 맞는가의 문제라는 것을 여기서 확인했습니다.</p>
+
+      <figure class="scroll">
+        <svg viewBox="0 0 840 236" role="img" aria-labelledby="d8-t d8-d">
+          <title id="d8-t">인덱스 선두 컬럼과 쿼리 조건절의 일치</title>
+          <desc id="d8-d">집계 쿼리는 created_at 범위 조건과 campaign_id, channel GROUP BY를 씁니다. 레포의 보조 인덱스 7개는 선두 컬럼이 created_at이 아니어서 사용되지 않았습니다(type=ALL, rows 943,334). 실험 인덱스 (created_at, campaign_id, channel)는 range 스캔으로 rows 1,431이었습니다.</desc>
+          <text x="0" y="20" class="dg-h">집계 쿼리 (1시간 윈도우)</text>
+          <rect class="dg-box" x="0" y="34" width="300" height="104"/>
+          <rect class="dg-hl" x="56" y="54" width="72" height="20"/>
+          <text x="16" y="68" class="dg-mi">WHERE created_at ≥ 1시간 전</text>
+          <text x="16" y="96" class="dg-mi">GROUP BY campaign_id,</text>
+          <text x="81" y="116" class="dg-mi">channel</text>
+
+          <path class="dg-bad dg-dash" d="M300,62 C330,62 330,66 358,66"/>
+          <text x="370" y="34" class="dg-t">레포의 보조 인덱스 7개</text>
+          <rect class="dg-rej" x="370" y="48" width="150" height="36"/>
+          <text x="445" y="71" text-anchor="middle" class="dg-s">다른 선두 컬럼</text>
+          <rect class="dg-rej" x="520" y="48" width="70" height="36"/>
+          <text x="555" y="71" text-anchor="middle" class="dg-s">…</text>
+          <text x="610" y="62" class="dg-tb">선두 불일치, 사용 안 함</text>
+          <text x="610" y="80" class="dg-m">type=ALL  rows 943,334</text>
+
+          <path class="dg-good" d="M300,70 C334,70 334,158 368,158"/>
+          <text x="370" y="128" class="dg-t">실험 인덱스 (레포 미반영)</text>
+          <rect class="dg-good-box" x="370" y="140" width="100" height="36"/>
+          <text x="420" y="163" text-anchor="middle" class="dg-mi">created_at</text>
+          <rect class="dg-box" x="470" y="140" width="100" height="36"/>
+          <text x="520" y="163" text-anchor="middle" class="dg-mi">campaign_id</text>
+          <rect class="dg-box" x="570" y="140" width="80" height="36"/>
+          <text x="610" y="163" text-anchor="middle" class="dg-mi">channel</text>
+          <text x="666" y="154" class="dg-tg">range 스캔</text>
+          <text x="666" y="172" class="dg-m">rows 1,431</text>
+
+          <text x="0" y="226" class="dg-s">rows는 EXPLAIN 추정치입니다. 합성 103만 행과 가정한 행 폭·버퍼 풀 조건에서 본 값이며, 인덱스로도 Using temporary는 남습니다.</text>
+        </svg>
+      </figure>
+    </section>
+
+    <section class="later" aria-labelledby="later-10">
+      <div class="later-tag"><b id="later-10">프로젝트 종료 후 개인 작업</b><span>2026.10</span></div>
+      <p>삭제했던 Kafka 컨슈머 통합 테스트를 다시 만들었습니다. 지울 때 문제였던 EmbeddedKafka 대신 실제 브로커(Testcontainers Kafka)와 MySQL을 쓰고, 정상 적재, 같은 <code>message_key</code> 재전달 시 1행, blank 키 스킵, 배치 도중 예외 시 전체 롤백의 4개 케이스를 고정했습니다. 삭제된 473줄을 그대로 되살린 것이 아니라 필요한 동작만 새로 썼고, DLQ 라우팅·재시도와 Flyway 스키마 일치는 포함하지 않았습니다.</p>
+      <p>이 테스트가 실제로 회귀를 잡는지 확인하려고 프로덕션 코드를 일부러 망가뜨려 봤습니다. <code>@Transactional</code>을 빼면 롤백 케이스가 실패했고, <code>updated_at</code>을 되살리면 4개 케이스가 모두 실패했습니다. 또 "AOP 프록시가 <code>List&lt;&gt;</code> 파라미터 매칭을 방해할 수 있다"고 가정했던 부분은 틀렸고, 프록시가 걸린 상태에서도 배치 리스너가 정상 동작했습니다.</p>
+
+      <figure>
+        <table class="matrix">
+          <caption>일부러 망가뜨린 코드에서 테스트가 잡아낸 것</caption>
+          <thead>
+            <tr><th scope="col">코드 상태</th><th scope="col">정상 적재</th><th scope="col">재전달 시 1행</th><th scope="col">blank 키 스킵</th><th scope="col">예외 시 배치 롤백</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">현재 코드</th><td><span class="pass">통과</span></td><td><span class="pass">통과</span></td><td><span class="pass">통과</span></td><td><span class="pass">통과</span></td></tr>
+            <tr><th scope="row"><code>@Transactional</code> 제거</th><td><span class="pass">통과</span></td><td><span class="pass">통과</span></td><td><span class="pass">통과</span></td><td><span class="fail">실패</span></td></tr>
+            <tr><th scope="row"><code>updated_at</code> INSERT 재도입</th><td><span class="fail">실패</span></td><td><span class="fail">실패</span></td><td><span class="fail">실패</span></td><td><span class="fail">실패</span></td></tr>
+          </tbody>
+        </table>
+        <figcaption>Testcontainers Kafka + MySQL 8.0, 2026-10-09 로컬 실행. 실험 후 코드는 원복했고, 이 작업은 개인 브랜치에 있으며 팀 레포 develop에는 병합되지 않았습니다.</figcaption>
+      </figure>
+    </section>
+
+    <nav class="pager" aria-label="프로젝트 이동">
+      <a href="../../#projects"><span>목록</span>전체 프로젝트</a>
+      <a href="../airadar/" style="text-align:right"><span>다음</span>AiRadar</a>
+    </nav>
+  </main>
+</div>
+
+<footer class="foot">
+  <div class="wrap">© 2026 이재영</div>
+</footer>
+
+<script src="../../assets/toc.js"></script>
+</body>
+</html>
